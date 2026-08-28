@@ -11,6 +11,7 @@ export default function ScanPage() {
     status: 'VALID' | 'ALREADY_USED' | 'INVALID';
     message: string;
     ticket?: any;
+    scannedAt?: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [manualCode, setManualCode] = useState('');
@@ -81,6 +82,19 @@ export default function ScanPage() {
     };
   }, [isAuthenticated, isScanningActive]);
 
+  const formatScanTime = (isoString?: string) => {
+    if (!isoString) return new Date().toLocaleTimeString('fr-FR');
+    try {
+      return new Date(isoString).toLocaleTimeString('fr-FR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    } catch {
+      return isoString;
+    }
+  };
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
@@ -130,36 +144,62 @@ export default function ScanPage() {
           )}
         </div>
 
-        {/* AFFICHAGE DU RÉSULTAT */}
+        {/* RÉSULTAT DU SCAN */}
         {scanResult && (
           <div
-            className={`p-6 rounded-2xl border text-center transition-all ${
-              scanResult.status === 'ALREADY_USED'
-                ? 'bg-red-950 border-red-500 text-red-100'
-                : scanResult.status === 'VALID'
-                ? 'bg-emerald-950 border-emerald-500 text-emerald-100'
+            className={`p-6 rounded-3xl border text-center transition-all ${
+              scanResult.status === 'VALID'
+                ? 'bg-emerald-950/90 border-emerald-500 text-white shadow-[0_0_30px_rgba(16,185,129,0.35)]'
+                : scanResult.status === 'ALREADY_USED'
+                ? 'bg-rose-950/95 border-rose-500 text-white shadow-[0_0_35px_rgba(244,63,94,0.45)]'
                 : 'bg-zinc-900 border-zinc-700 text-zinc-300'
             }`}
           >
-            <h3 className="text-xl font-black">{scanResult.message}</h3>
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider mb-3 bg-black/40 border border-white/10">
+              {scanResult.status === 'VALID' && '🟢 Accès Autorisé'}
+              {scanResult.status === 'ALREADY_USED' && '🔴 Accès Refusé'}
+              {scanResult.status === 'INVALID' && '⚠️ Code Rejeté'}
+            </div>
+
+            <h3 className="text-2xl font-black tracking-wide mb-1">{scanResult.message}</h3>
+
+            <p className="text-xs text-zinc-300 mb-4 font-mono">
+              {scanResult.status === 'ALREADY_USED' ? 'Premier scan enregistré à :' : 'Validé à :'} {' '}
+              <span className="font-bold text-white bg-black/50 px-2 py-0.5 rounded">
+                {formatScanTime(scanResult.scannedAt || scanResult.ticket?.scanned_at)}
+              </span>
+            </p>
 
             {scanResult.ticket && (
-              <div className="mt-3 text-xs text-left bg-black/60 p-3.5 rounded-xl space-y-1.5 border border-zinc-800">
-                <p><span className="text-zinc-500">Participant :</span> <strong>{scanResult.ticket.customer_name}</strong></p>
-                <p><span className="text-zinc-500">Formule :</span> <strong className="text-amber-400">{scanResult.ticket.ticket_type}</strong></p>
-                <p><span className="text-zinc-500">Code :</span> <strong className="font-mono text-zinc-200">{scanResult.ticket.ticket_code}</strong></p>
-                <p>
-                  <span className="text-zinc-500">Statut :</span>{' '}
-                  <strong className={scanResult.status === 'ALREADY_USED' ? 'text-red-400 font-black' : 'text-emerald-400 font-black'}>
-                    {scanResult.status === 'ALREADY_USED' ? 'DÉJÀ ENTRÉ' : 'VALIDE'}
-                  </strong>
-                </p>
+              <div className="text-xs text-left bg-black/60 p-4 rounded-2xl space-y-2 border border-white/10 mb-4">
+                <div className="flex justify-between border-b border-zinc-800 pb-1.5">
+                  <span className="text-zinc-400">Participant :</span>
+                  <strong className="text-white">{scanResult.ticket.customer_name}</strong>
+                </div>
+                <div className="flex justify-between border-b border-zinc-800 pb-1.5">
+                  <span className="text-zinc-400">Formule :</span>
+                  <strong className="text-amber-400">{scanResult.ticket.ticket_type}</strong>
+                </div>
+                <div className="flex justify-between border-b border-zinc-800 pb-1.5">
+                  <span className="text-zinc-400">Code Pass :</span>
+                  <strong className="font-mono text-zinc-200">{scanResult.ticket.ticket_code}</strong>
+                </div>
+                <div className="flex justify-between items-center pt-0.5">
+                  <span className="text-zinc-400">Statut du pass :</span>
+                  <span className={`font-black uppercase px-2 py-0.5 rounded text-[11px] ${
+                    scanResult.status === 'VALID'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                  }`}>
+                    {scanResult.status === 'ALREADY_USED' ? 'DÉJÀ ENTRÉ' : 'ENTRÉE VALIDÉE'}
+                  </span>
+                </div>
               </div>
             )}
 
             <button
               onClick={handleNextScan}
-              className="mt-4 w-full bg-white text-black font-bold py-2.5 rounded-xl text-sm hover:bg-zinc-200 transition"
+              className="w-full bg-white text-black font-bold py-3 rounded-xl text-sm hover:bg-zinc-200 transition shadow-lg"
             >
               Scanner le billet suivant
             </button>
@@ -168,7 +208,7 @@ export default function ScanPage() {
 
         {/* SAISIE MANUELLE */}
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl space-y-2">
-          <label className="text-xs text-zinc-400">Ou saisie manuelle :</label>
+          <label className="text-xs text-zinc-400">Ou saisie manuelle du code :</label>
           <div className="flex gap-2">
             <input
               type="text"
