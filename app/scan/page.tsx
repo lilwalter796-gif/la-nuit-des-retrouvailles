@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { Scanner } from '@yudiel/react-qr-scanner';
+import { useState, useEffect, useRef } from 'react';
+import { Html5Qrcode } from 'html5-qrcode';
 import Link from 'next/link';
 
 export default function ScanPage() {
@@ -10,6 +10,8 @@ export default function ScanPage() {
   const [scanResult, setScanResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [manualCode, setManualCode] = useState('');
+  const [cameraActive, setCameraActive] = useState(false);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,15 +22,8 @@ export default function ScanPage() {
     }
   };
 
-  const handleScan = async (detectedCodes: any[]) => {
-    if (!detectedCodes || detectedCodes.length === 0 || loading) return;
-    const rawValue = detectedCodes[0]?.rawValue;
-    if (rawValue) {
-      await verifyTicket(rawValue);
-    }
-  };
-
   const verifyTicket = async (code: string) => {
+    if (!code || loading) return;
     setLoading(true);
     try {
       const res = await fetch('/api/scan', {
@@ -44,6 +39,36 @@ export default function ScanPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const html5QrCode = new Html5Qrcode('reader');
+    scannerRef.current = html5QrCode;
+
+    html5QrCode
+      .start(
+        { facingMode: 'environment' },
+        {
+          fps: 10,
+          qrbox: { width: 250, height: 250 },
+        },
+        (decodedText) => {
+          verifyTicket(decodedText);
+        },
+        () => {}
+      )
+      .then(() => setCameraActive(true))
+      .catch((err) => {
+        console.warn('Erreur accès caméra:', err);
+      });
+
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.stop().catch(() => {});
+      }
+    };
+  }, [isAuthenticated]);
 
   if (!isAuthenticated) {
     return (
@@ -76,20 +101,16 @@ export default function ScanPage() {
             <h2 className="font-bold text-sm text-amber-400">SCANNER ENTRÉE</h2>
             <p className="text-xs text-zinc-400">La Nuit des Retrouvailles</p>
           </div>
-          <button onClick={() => setScanResult(null)} className="text-xs bg-zinc-800 px-3 py-1.5 rounded-lg text-zinc-300">
+          <button onClick={() => setScanResult(null)} className="text-xs bg-zinc-800 hover:bg-zinc-700 px-3 py-1.5 rounded-lg text-zinc-300">
             Nouveau Scan
           </button>
         </div>
 
         {/* CADRE SCANNER CAMÉRA */}
-        <div className="relative rounded-3xl overflow-hidden border-2 border-dashed border-amber-500/50 bg-black aspect-square">
-          <Scanner
-            onScan={handleScan}
-            formats={['qr_code']}
-            styles={{ container: { width: '100%', height: '100%' } }}
-          />
+        <div className="relative rounded-3xl overflow-hidden border-2 border-dashed border-amber-500/50 bg-black min-h-[300px] flex items-center justify-center">
+          <div id="reader" className="w-full"></div>
           {loading && (
-            <div className="absolute inset-0 bg-black/80 flex items-center justify-center text-amber-400 font-bold">
+            <div className="absolute inset-0 bg-black/80 flex items-center justify-center text-amber-400 font-bold z-10">
               Vérification en cours...
             </div>
           )}
