@@ -5,14 +5,14 @@ import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
-export default async function TicketPage({
-  searchParams,
-}: {
+interface Props {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
-}) {
-  const params = await searchParams;
-  const rawCode = params?.code;
-  const rawSessionId = params?.session_id;
+}
+
+export default async function TicketPage(props: Props) {
+  const searchParams = await props.searchParams;
+  const rawCode = searchParams?.code;
+  const rawSessionId = searchParams?.session_id;
 
   const code = typeof rawCode === 'string' ? rawCode : Array.isArray(rawCode) ? rawCode[0] : undefined;
   const sessionId = typeof rawSessionId === 'string' ? rawSessionId : Array.isArray(rawSessionId) ? rawSessionId[0] : undefined;
@@ -22,8 +22,8 @@ export default async function TicketPage({
       <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
         <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl max-w-md w-full text-center">
           <h2 className="text-red-500 text-xl font-bold mb-2">Billet introuvable</h2>
-          <p className="text-zinc-400 text-sm mb-6">Aucun identifiant de billet fourni.</p>
-          <Link href="/" className="inline-block bg-amber-500 text-black font-bold px-6 py-3 rounded-xl hover:bg-amber-400 transition">
+          <p className="text-zinc-400 text-sm mb-6">Aucun identifiant fourni.</p>
+          <Link href="/" className="inline-block bg-amber-500 text-black font-bold px-6 py-3 rounded-xl">
             Retour à l'accueil
           </Link>
         </div>
@@ -31,14 +31,7 @@ export default async function TicketPage({
     );
   }
 
-  let ticket: {
-    ticket_code: string;
-    customer_name: string;
-    customer_email: string;
-    ticket_type: string;
-    amount_paid: number;
-    status: string;
-  } | null = null;
+  let ticket: any = null;
 
   try {
     if (code) {
@@ -51,10 +44,9 @@ export default async function TicketPage({
 
     if (!ticket && sessionId) {
       const session = await stripe.checkout.sessions.retrieve(sessionId);
-
       if (session) {
-        const customerEmail = session.customer_details?.email || 'client@la-nuit-des-retrouvailles.com';
-        const customerName = session.customer_details?.name || session.metadata?.customer_name || 'Invité';
+        const customerEmail = session.customer_details?.email || 'client@evenement.com';
+        const customerName = session.customer_details?.name || session.metadata?.customer_name || 'Invité VIP';
         const ticketType = session.metadata?.ticket_type || 'ENTRÉE SIMPLE + CONSO';
         const ticketCode = `LNR-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`;
         const amountPaid = (session.amount_total || 2000) / 100;
@@ -82,7 +74,7 @@ export default async function TicketPage({
       }
     }
   } catch (err: any) {
-    console.error('Erreur Serveur Ticket:', err);
+    console.error('Erreur Serveur:', err);
   }
 
   if (!ticket) {
@@ -90,8 +82,8 @@ export default async function TicketPage({
       <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
         <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl max-w-md w-full text-center">
           <h2 className="text-red-500 text-xl font-bold mb-2">Billet introuvable</h2>
-          <p className="text-zinc-400 text-sm mb-6">Impossible de charger les données du billet.</p>
-          <Link href="/" className="inline-block bg-amber-500 text-black font-bold px-6 py-3 rounded-xl hover:bg-amber-400 transition">
+          <p className="text-zinc-400 text-sm mb-6">Impossible de charger les informations de ce pass.</p>
+          <Link href="/" className="inline-block bg-amber-500 text-black font-bold px-6 py-3 rounded-xl">
             Retour à l'accueil
           </Link>
         </div>
@@ -99,13 +91,25 @@ export default async function TicketPage({
     );
   }
 
+  // Déclencher l'envoi d'email via la route API en interne
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://la-nuit-des-retrouvailles.vercel.app';
+  if (ticket.customer_email && process.env.RESEND_API_KEY) {
+    fetch(`${siteUrl}/api/send-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        toEmail: ticket.customer_email,
+        customerName: ticket.customer_name,
+        ticketCode: ticket.ticket_code,
+        ticketType: ticket.ticket_type,
+      }),
+    }).catch((e) => console.error('Erreur auto-envoi:', e));
+  }
+
   const qrCodeDataUrl = await QRCode.toDataURL(ticket.ticket_code, {
     width: 320,
     margin: 2,
-    color: {
-      dark: '#000000',
-      light: '#FFFFFF',
-    },
+    color: { dark: '#000000', light: '#FFFFFF' },
   });
 
   return (
@@ -123,18 +127,21 @@ export default async function TicketPage({
           17 OCTOBRE 2026 • PARMA
         </p>
 
+        {/* QR CODE */}
         <div className="bg-white p-4 rounded-2xl inline-block mb-6 shadow-xl">
-          <img
-            src={qrCodeDataUrl}
-            alt={`QR Code ${ticket.ticket_code}`}
-            className="w-56 h-56 mx-auto rounded-lg"
-          />
+          <img src={qrCodeDataUrl} alt={`QR Code ${ticket.ticket_code}`} className="w-56 h-56 mx-auto rounded-lg" />
         </div>
 
+        {/* DETAILS TABLE */}
         <div className="bg-black/60 border border-zinc-800 rounded-2xl p-4 text-left space-y-3 text-sm mb-6">
           <div className="flex justify-between items-center border-b border-zinc-800 pb-2.5">
             <span className="text-zinc-500 text-xs uppercase font-medium">Participant</span>
             <span className="font-bold text-zinc-100">{ticket.customer_name}</span>
+          </div>
+
+          <div className="flex justify-between items-center border-b border-zinc-800 pb-2.5">
+            <span className="text-zinc-500 text-xs uppercase font-medium">Email</span>
+            <span className="font-medium text-zinc-300 text-xs">{ticket.customer_email}</span>
           </div>
 
           <div className="flex justify-between items-center border-b border-zinc-800 pb-2.5">
