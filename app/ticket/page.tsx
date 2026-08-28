@@ -23,7 +23,7 @@ export default async function TicketPage(props: Props) {
       <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
         <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl max-w-md w-full text-center">
           <h2 className="text-red-500 text-xl font-bold mb-2">Billet introuvable</h2>
-          <p className="text-zinc-400 text-sm mb-6">Aucun identifiant de session ou de billet n'a été fourni.</p>
+          <p className="text-zinc-400 text-sm mb-6">Aucun identifiant de billet fourni dans l'URL.</p>
           <Link href="/" className="inline-block bg-amber-500 text-black font-bold px-6 py-3 rounded-xl hover:bg-amber-400 transition">
             Retour à l'accueil
           </Link>
@@ -33,9 +33,10 @@ export default async function TicketPage(props: Props) {
   }
 
   let ticket: any = null;
+  let debugError: string | null = null;
 
   try {
-    // 1. Recherche directe dans Supabase (priorité si déjà enregistré)
+    // 1. Recherche par code ou session_id dans Supabase
     if (code) {
       const { data } = await supabaseAdmin.from('tickets').select('*').eq('ticket_code', code).maybeSingle();
       ticket = data;
@@ -44,18 +45,18 @@ export default async function TicketPage(props: Props) {
       ticket = data;
     }
 
-    // 2. Si introuvable dans Supabase mais session Stripe présente : Récupération & Insertion immédiate
+    // 2. Récupération directe depuis Stripe si pas encore présent dans la base
     if (!ticket && sessionId) {
       const session = await stripe.checkout.sessions.retrieve(sessionId);
 
       if (session) {
         const customerEmail = session.customer_details?.email || 'client@evenement.com';
-        const customerName = session.customer_details?.name || session.metadata?.customer_name || 'Invité VIP';
+        const customerName = session.customer_details?.name || session.metadata?.customer_name || 'Invité';
         const ticketType = session.metadata?.ticket_type || 'ENTRÉE SIMPLE + CONSO';
         const ticketCode = `LNR-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`;
         const amountPaid = (session.amount_total || 2000) / 100;
 
-        // Insertion robuste dans Supabase
+        // Insertion dans Supabase
         const { data: newTicket, error: insertError } = await supabaseAdmin
           .from('tickets')
           .insert([
@@ -74,19 +75,8 @@ export default async function TicketPage(props: Props) {
 
         if (!insertError && newTicket) {
           ticket = newTicket;
-
-          // Déclenchement de l'email Resend en arrière-plan sans bloquer la page
-          if (customerEmail && process.env.RESEND_API_KEY) {
-            sendTicketEmail({
-              toEmail: customerEmail,
-              customerName: customerName,
-              ticketCode: ticketCode,
-              ticketType: ticketType,
-              siteUrl: process.env.NEXT_PUBLIC_SITE_URL || 'https://la-nuit-des-retrouvailles.vercel.app',
-            }).catch((e) => console.error('Erreur envoi email Resend:', e));
-          }
         } else {
-          // Fallback d'affichage direct si Supabase a un problème de table/droits
+          // Si Supabase renvoie une erreur, on utilise quand même les données Stripe pour ne pas bloquer l'acheteur
           ticket = {
             ticket_code: ticketCode,
             customer_name: customerName,
@@ -96,19 +86,35 @@ export default async function TicketPage(props: Props) {
             status: 'VALID',
           };
         }
+
+        // Envoi email en tâche de fond
+        if (customerEmail && process.env.RESEND_API_KEY) {
+          sendTicketEmail({
+            toEmail: customerEmail,
+            customerName: customerName,
+            ticketCode: ticketCode,
+            ticketType: ticketType,
+            siteUrl: process.env.NEXT_PUBLIC_SITE_URL || 'https://la-nuit-des-retrouvailles.vercel.app',
+          }).catch((err) => console.error('Erreur envoi email:', err));
+        }
       }
     }
   } catch (err: any) {
-    console.error('Erreur Serveur Récupération Billet:', err);
+    debugError = err.message || 'Erreur inconnue';
+    console.error('Erreur Serveur:', err);
   }
 
-  // Si après tout cela aucun billet ne peut être résolu
   if (!ticket) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
         <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl max-w-md w-full text-center">
           <h2 className="text-red-500 text-xl font-bold mb-2">Billet introuvable</h2>
-          <p className="text-zinc-400 text-sm mb-6">Impossible de valider cette transaction. Veuillez contacter l'organisation.</p>
+          <p className="text-zinc-400 text-sm mb-4">Impossible de récupérer le pass associé.</p>
+          {debugError && (
+            <p className="bg-black/50 text-red-400 text-xs font-mono p-3 rounded-lg mb-4 text-left break-all">
+              {debugError}
+            </p>
+          )}
           <Link href="/" className="inline-block bg-amber-500 text-black font-bold px-6 py-3 rounded-xl hover:bg-amber-400 transition">
             Retour à l'accueil
           </Link>
@@ -117,7 +123,6 @@ export default async function TicketPage(props: Props) {
     );
   }
 
-  // Génération directe du QR code en image base64
   const qrCodeDataUrl = await QRCode.toDataURL(ticket.ticket_code, {
     width: 320,
     margin: 2,
@@ -129,7 +134,7 @@ export default async function TicketPage(props: Props) {
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col items-center justify-center p-4 sm:p-6">
-      <div className="bg-zinc-900/90 border border-amber-500/40 rounded-3xl p-6 sm:p-8 max-w-md w-full text-center shadow-2xl backdrop-blur-md">
+      <div className="bg-zinc-900 border border-amber-500/40 rounded-3xl p-6 sm:p-8 max-w-md w-full text-center shadow-2xl">
         <div className="inline-flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase px-3.5 py-1.5 rounded-full mb-5">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
           Billet Officiel Conforme
@@ -142,7 +147,6 @@ export default async function TicketPage(props: Props) {
           17 OCTOBRE 2026 • PARMA
         </p>
 
-        {/* QR CODE CONTAINER */}
         <div className="bg-white p-4 rounded-2xl inline-block mb-6 shadow-xl">
           <img
             src={qrCodeDataUrl}
@@ -151,7 +155,6 @@ export default async function TicketPage(props: Props) {
           />
         </div>
 
-        {/* DETAILS TABLE */}
         <div className="bg-black/60 border border-zinc-800 rounded-2xl p-4 text-left space-y-3 text-sm mb-6">
           <div className="flex justify-between items-center border-b border-zinc-800 pb-2.5">
             <span className="text-zinc-500 text-xs uppercase font-medium">Participant</span>
@@ -176,8 +179,8 @@ export default async function TicketPage(props: Props) {
           </div>
         </div>
 
-        <p className="text-zinc-500 text-xs mb-6 leading-relaxed">
-          Présentez ce QR Code directement sur votre téléphone aux agents de sécurité à l'entrée.
+        <p className="text-zinc-500 text-xs mb-6">
+          Présentez ce QR Code à l'entrée de l'événement le 17 octobre 2026.
         </p>
 
         <Link
