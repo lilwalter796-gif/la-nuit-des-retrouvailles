@@ -27,7 +27,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ ticket: existingTicket });
     }
 
-    // 2. Si le webhook n'a pas encore créé le billet, le créer à la volée via la session Stripe
+    // 2. Si non trouvé et qu'on a le sessionId Stripe, récupérer la session et créer le billet
     if (sessionId) {
       const session = await stripe.checkout.sessions.retrieve(sessionId);
 
