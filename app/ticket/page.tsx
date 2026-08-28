@@ -5,17 +5,17 @@ import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
-interface PageProps {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }> | { [key: string]: string | string[] | undefined };
-}
+export default async function TicketPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const params = await searchParams;
+  const rawCode = params?.code;
+  const rawSessionId = params?.session_id;
 
-export default async function TicketPage(props: PageProps) {
-  const searchParams = await props.searchParams;
-  const rawCode = searchParams?.code;
-  const rawSessionId = searchParams?.session_id;
-
-  const code = Array.isArray(rawCode) ? rawCode[0] : rawCode;
-  const sessionId = Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId;
+  const code = typeof rawCode === 'string' ? rawCode : Array.isArray(rawCode) ? rawCode[0] : undefined;
+  const sessionId = typeof rawSessionId === 'string' ? rawSessionId : Array.isArray(rawSessionId) ? rawSessionId[0] : undefined;
 
   if (!code && !sessionId) {
     return (
@@ -31,10 +31,16 @@ export default async function TicketPage(props: PageProps) {
     );
   }
 
-  let ticket: any = null;
+  let ticket: {
+    ticket_code: string;
+    customer_name: string;
+    customer_email: string;
+    ticket_type: string;
+    amount_paid: number;
+    status: string;
+  } | null = null;
 
   try {
-    // 1. Chercher dans Supabase
     if (code) {
       const { data } = await supabaseAdmin.from('tickets').select('*').eq('ticket_code', code).maybeSingle();
       if (data) ticket = data;
@@ -43,7 +49,6 @@ export default async function TicketPage(props: PageProps) {
       if (data) ticket = data;
     }
 
-    // 2. Si non trouvé dans Supabase, récupérer Stripe directement
     if (!ticket && sessionId) {
       const session = await stripe.checkout.sessions.retrieve(sessionId);
 
@@ -63,7 +68,6 @@ export default async function TicketPage(props: PageProps) {
           status: 'VALID',
         };
 
-        // Sauvegarde Supabase
         await supabaseAdmin.from('tickets').insert([
           {
             ticket_code: ticketCode,
@@ -86,7 +90,7 @@ export default async function TicketPage(props: PageProps) {
       <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
         <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl max-w-md w-full text-center">
           <h2 className="text-red-500 text-xl font-bold mb-2">Billet introuvable</h2>
-          <p className="text-zinc-400 text-sm mb-6">Impossible de valider cette commande.</p>
+          <p className="text-zinc-400 text-sm mb-6">Impossible de charger les données du billet.</p>
           <Link href="/" className="inline-block bg-amber-500 text-black font-bold px-6 py-3 rounded-xl hover:bg-amber-400 transition">
             Retour à l'accueil
           </Link>
