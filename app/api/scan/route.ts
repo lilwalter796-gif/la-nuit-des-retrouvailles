@@ -8,64 +8,77 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { code, pin } = body;
 
-    // 1. Vérification PIN
+    // 1. PIN de sécurité
     if (pin !== '8520') {
       return NextResponse.json({ success: false, message: 'Code PIN incorrect' }, { status: 401 });
     }
 
     if (!code) {
-      return NextResponse.json({ success: false, message: 'Aucun code fourni' }, { status: 400 });
+      return NextResponse.json({ success: false, message: 'Aucun code détecté' }, { status: 400 });
     }
 
-    // 2. Nettoyage du code
-    let cleanCode = String(code).trim();
-    if (cleanCode.includes('code=')) {
-      cleanCode = cleanCode.split('code=')[1].split('&')[0];
-    } else if (cleanCode.includes('/ticket/')) {
-      cleanCode = cleanCode.split('/ticket/')[1].split('?')[0];
+    let inputStr = String(code).trim();
+    let searchCode = inputStr;
+    let searchSessionId = '';
+
+    // Extraction si le QR code contient une URL
+    if (inputStr.includes('http://') || inputStr.includes('https://')) {
+      try {
+        const parsedUrl = new URL(inputStr);
+        searchCode = parsedUrl.searchParams.get('code') || '';
+        searchSessionId = parsedUrl.searchParams.get('session_id') || '';
+      } catch (e) {
+        // Fallback découpage manuel
+        if (inputStr.includes('code=')) {
+          searchCode = inputStr.split('code=')[1].split('&')[0];
+        }
+        if (inputStr.includes('session_id=')) {
+          searchSessionId = inputStr.split('session_id=')[1].split('&')[0];
+        }
+      }
     }
 
-    // 3. Recherche dans Supabase
-    const { data: ticket, error: fetchError } = await supabaseAdmin
-      .from('tickets')
-      .select('*')
-      .ilike('ticket_code', cleanCode)
-      .maybeSingle();
+    // 2. Recherche dans Supabase par code ou par session_id
+    let query = supabaseAdmin.from('tickets').select('*');
+    
+    if (searchCode && searchSessionId) {
+      query = query.or(`ticket_code.ilike.${searchCode},stripe_session_id.eq.${searchSessionId}`);
+    } else if (searchCode) {
+      query = query.ilike('ticket_code', searchCode);
+    } else if (searchSessionId) {
+      query = query.eq('stripe_session_id', searchSessionId);
+    } else {
+      query = query.ilike('ticket_code', inputStr);
+    }
+
+    const { data: ticket, error: fetchError } = await query.maybeSingle();
 
     if (fetchError) {
-      console.error('Erreur lecture Supabase:', fetchError);
+      console.error('Erreur Supabase scan:', fetchError);
     }
 
-    // 4. Si le billet existe déjà en base
+    // 3. Cas A : Le billet existe en base
     if (ticket) {
-      const isAlreadyUsed =
-        ticket.status?.toUpperCase() === 'USED' ||
-        ticket.status?.toUpperCase() === 'UTILISÉ' ||
-        ticket.status?.toUpperCase() === 'UTILISE';
+      const isAlreadyUsed = 
+        ticket.status === 'USED' || 
+        ticket.status === 'UTILISÉ' || 
+        ticket.status === 'UTILISE';
 
       if (isAlreadyUsed) {
-        const scanTime = ticket.scanned_at
-          ? new Date(ticket.scanned_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-          : 'précédemment';
-
         return NextResponse.json({
           success: false,
           alreadyUsed: true,
-          message: `⚠️ BILLET DÉJÀ UTILISÉ (Scanné à ${scanTime})`,
+          message: '⚠️ BILLET DÉJÀ UTILISÉ !',
           ticket,
         });
       }
 
-      // Marquer comme USED avec horodatage
+      // Marquer comme USED
       const now = new Date().toISOString();
-      const { error: updateError } = await supabaseAdmin
+      await supabaseAdmin
         .from('tickets')
         .update({ status: 'USED', scanned_at: now })
         .eq('id', ticket.id);
-
-      if (updateError) {
-        console.error('Erreur mise à jour statut:', updateError);
-      }
 
       return NextResponse.json({
         success: true,
@@ -75,36 +88,43 @@ export async function POST(req: Request) {
       });
     }
 
-    // 5. Si non trouvé mais format valide (Fallback LNR-)
-    if (cleanCode.startsWith('LNR-')) {
+    // 4. Cas B : Billet généré mais pas encore présent dans la table tickets
+    const finalCode = searchCode || inputStr;
+    if (finalCode.startsWith('LNR-')) {
       const now = new Date().toISOString();
-      const newTicket = {
-        ticket_code: cleanCode,
-        customer_name: 'Invité Confirmé',
-        customer_email: 'Validé à l\'entrée',
-        ticket_type: 'PASS OFFICIEL',
-        amount_paid: 20,
-        status: 'USED',
-        scanned_at: now,
-      };
-
-      await supabaseAdmin.from('tickets').insert([newTicket]);
+      const { data: insertedTicket } = await supabaseAdmin
+        .from('tickets')
+        .insert([
+          {
+            ticket_code: finalCode,
+            customer_name: 'Invité Confirmé',
+            customer_email: 'Enregistré au scan',
+            ticket_type: 'PASS OFFICIEL',
+            amount_paid: 20,
+            status: 'USED',
+            scanned_at: now,
+          },
+        ])
+        .select()
+        .single();
 
       return NextResponse.json({
         success: true,
         alreadyUsed: false,
-        message: '✅ ENTRÉE VALIDÉE (Enregistré)',
-        ticket: newTicket,
+        message: '✅ ENTRÉE VALIDÉE',
+        ticket: insertedTicket || { ticket_code: finalCode, customer_name: 'Invité Confirmé', status: 'USED' },
       });
     }
 
+    // 5. Code inconnu
     return NextResponse.json({
       success: false,
       alreadyUsed: false,
-      message: '❌ Billet introuvable / Code non valide',
+      message: '❌ Billet introuvable / Code invalide',
     });
+
   } catch (err: any) {
-    console.error('Erreur scan API:', err);
+    console.error('Erreur serveur API Scan:', err);
     return NextResponse.json({ success: false, message: 'Erreur serveur interne' }, { status: 500 });
   }
 }

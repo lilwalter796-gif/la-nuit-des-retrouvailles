@@ -10,7 +10,7 @@ export default function ScanPage() {
   const [scanResult, setScanResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [manualCode, setManualCode] = useState('');
-  const [isPaused, setIsPaused] = useState(false);
+  const [isScanningActive, setIsScanningActive] = useState(true);
   const scannerRef = useRef<Html5Qrcode | null>(null);
 
   const handleLogin = (e: React.FormEvent) => {
@@ -22,16 +22,16 @@ export default function ScanPage() {
     }
   };
 
-  const verifyTicket = async (code: string) => {
-    if (!code || loading || isPaused) return;
+  const verifyTicket = async (scannedText: string) => {
+    if (!scannedText || loading || !isScanningActive) return;
     setLoading(true);
-    setIsPaused(true);
+    setIsScanningActive(false);
 
     try {
       const res = await fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: code.trim(), pin: '8520' }),
+        body: JSON.stringify({ code: scannedText.trim(), pin: '8520' }),
       });
       const data = await res.json();
       setScanResult(data);
@@ -42,9 +42,10 @@ export default function ScanPage() {
     }
   };
 
-  const resumeScan = () => {
+  const handleNextScan = () => {
     setScanResult(null);
-    setIsPaused(false);
+    setManualCode('');
+    setIsScanningActive(true);
   };
 
   useEffect(() => {
@@ -74,7 +75,7 @@ export default function ScanPage() {
         scannerRef.current.stop().catch(() => {});
       }
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isScanningActive]);
 
   if (!isAuthenticated) {
     return (
@@ -108,10 +109,10 @@ export default function ScanPage() {
             <p className="text-xs text-zinc-400">La Nuit des Retrouvailles</p>
           </div>
           <button
-            onClick={resumeScan}
+            onClick={handleNextScan}
             className="text-xs bg-amber-500 text-black font-bold px-3 py-1.5 rounded-lg hover:bg-amber-400 transition"
           >
-            Scanner Suivant
+            Nouveau Scan
           </button>
         </div>
 
@@ -119,37 +120,37 @@ export default function ScanPage() {
         <div className="relative rounded-3xl overflow-hidden border-2 border-dashed border-amber-500/50 bg-black min-h-[280px] flex items-center justify-center">
           <div id="reader" className="w-full"></div>
           {loading && (
-            <div className="absolute inset-0 bg-black/80 flex items-center justify-center text-amber-400 font-bold z-10">
-              Vérification...
+            <div className="absolute inset-0 bg-black/85 flex items-center justify-center text-amber-400 font-bold z-10">
+              Vérification en direct...
             </div>
           )}
         </div>
 
-        {/* RÉSULTAT SCAN VISIBLE & CLAIR */}
+        {/* RÉSULTAT SCAN VISIBLE */}
         {scanResult && (
           <div
             className={`p-5 rounded-2xl border text-center transition-all ${
-              scanResult.success
-                ? 'bg-emerald-950/90 border-emerald-500 text-emerald-100 shadow-[0_0_20px_rgba(16,185,129,0.3)]'
-                : scanResult.alreadyUsed
-                ? 'bg-red-950/95 border-red-500 text-red-100 shadow-[0_0_25px_rgba(239,68,68,0.5)]'
+              scanResult.alreadyUsed
+                ? 'bg-red-950 border-red-500 text-red-100 shadow-[0_0_30px_rgba(239,68,68,0.6)] animate-pulse'
+                : scanResult.success
+                ? 'bg-emerald-950 border-emerald-500 text-emerald-100 shadow-[0_0_20px_rgba(16,185,129,0.4)]'
                 : 'bg-zinc-900 border-zinc-700 text-zinc-300'
             }`}
           >
-            <h3 className="text-lg font-black tracking-wide">{scanResult.message}</h3>
+            <h3 className="text-xl font-black tracking-wide">{scanResult.message}</h3>
 
             {scanResult.ticket && (
               <div className="mt-3 text-xs text-left bg-black/60 p-3.5 rounded-xl space-y-1.5 border border-zinc-800">
-                <p><span className="text-zinc-500">Participant :</span> <strong>{scanResult.ticket.customer_name}</strong></p>
-                <p><span className="text-zinc-500">Formule :</span> <strong className="text-amber-400">{scanResult.ticket.ticket_type}</strong></p>
+                <p><span className="text-zinc-500">Participant :</span> <strong>{scanResult.ticket.customer_name || 'Invité'}</strong></p>
+                <p><span className="text-zinc-500">Formule :</span> <strong className="text-amber-400">{scanResult.ticket.ticket_type || 'PASS'}</strong></p>
                 <p><span className="text-zinc-500">Code :</span> <strong className="font-mono text-zinc-200">{scanResult.ticket.ticket_code}</strong></p>
-                <p><span className="text-zinc-500">Statut actuel :</span> <strong className={scanResult.alreadyUsed ? 'text-red-400 uppercase' : 'text-emerald-400 uppercase'}>{scanResult.ticket.status}</strong></p>
+                <p><span className="text-zinc-500">Statut :</span> <strong className={scanResult.alreadyUsed ? 'text-red-400 font-black' : 'text-emerald-400 font-black'}>{scanResult.ticket.status}</strong></p>
               </div>
             )}
 
             <button
-              onClick={resumeScan}
-              className="mt-4 w-full bg-white text-black font-bold py-2.5 rounded-xl text-xs hover:bg-zinc-200 transition"
+              onClick={handleNextScan}
+              className="mt-4 w-full bg-white text-black font-bold py-3 rounded-xl text-sm hover:bg-zinc-200 transition"
             >
               Scanner le billet suivant
             </button>
@@ -158,7 +159,7 @@ export default function ScanPage() {
 
         {/* SAISIE MANUELLE */}
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl space-y-2">
-          <label className="text-xs text-zinc-400">Saisie manuelle du code :</label>
+          <label className="text-xs text-zinc-400">Ou saisir le code manuellement :</label>
           <div className="flex gap-2">
             <input
               type="text"
