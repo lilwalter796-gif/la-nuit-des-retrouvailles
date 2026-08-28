@@ -7,7 +7,11 @@ import Link from 'next/link';
 export default function ScanPage() {
   const [pin, setPin] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [scanResult, setScanResult] = useState<any>(null);
+  const [scanResult, setScanResult] = useState<{
+    status: 'VALID' | 'ALREADY_USED' | 'INVALID';
+    message: string;
+    ticket?: any;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [manualCode, setManualCode] = useState('');
   const [isScanningActive, setIsScanningActive] = useState(true);
@@ -22,8 +26,8 @@ export default function ScanPage() {
     }
   };
 
-  const verifyTicket = async (scannedText: string) => {
-    if (!scannedText || loading || !isScanningActive) return;
+  const verifyTicket = async (code: string) => {
+    if (!code || loading || !isScanningActive) return;
     setLoading(true);
     setIsScanningActive(false);
 
@@ -31,12 +35,12 @@ export default function ScanPage() {
       const res = await fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: scannedText.trim(), pin: '8520' }),
+        body: JSON.stringify({ code: code.trim(), pin: '8520' }),
       });
       const data = await res.json();
       setScanResult(data);
     } catch (err) {
-      setScanResult({ success: false, message: 'Erreur de connexion au serveur' });
+      setScanResult({ status: 'INVALID', message: 'Erreur de connexion au serveur' });
     } finally {
       setLoading(false);
     }
@@ -116,41 +120,46 @@ export default function ScanPage() {
           </button>
         </div>
 
-        {/* CADRE SCANNER */}
+        {/* CADRE CAMÉRA */}
         <div className="relative rounded-3xl overflow-hidden border-2 border-dashed border-amber-500/50 bg-black min-h-[280px] flex items-center justify-center">
           <div id="reader" className="w-full"></div>
           {loading && (
             <div className="absolute inset-0 bg-black/85 flex items-center justify-center text-amber-400 font-bold z-10">
-              Vérification en direct...
+              Vérification...
             </div>
           )}
         </div>
 
-        {/* RÉSULTAT SCAN VISIBLE */}
+        {/* AFFICHAGE DU RÉSULTAT */}
         {scanResult && (
           <div
-            className={`p-5 rounded-2xl border text-center transition-all ${
-              scanResult.alreadyUsed
-                ? 'bg-red-950 border-red-500 text-red-100 shadow-[0_0_30px_rgba(239,68,68,0.6)] animate-pulse'
-                : scanResult.success
-                ? 'bg-emerald-950 border-emerald-500 text-emerald-100 shadow-[0_0_20px_rgba(16,185,129,0.4)]'
+            className={`p-6 rounded-2xl border text-center transition-all ${
+              scanResult.status === 'ALREADY_USED'
+                ? 'bg-red-950 border-red-500 text-red-100'
+                : scanResult.status === 'VALID'
+                ? 'bg-emerald-950 border-emerald-500 text-emerald-100'
                 : 'bg-zinc-900 border-zinc-700 text-zinc-300'
             }`}
           >
-            <h3 className="text-xl font-black tracking-wide">{scanResult.message}</h3>
+            <h3 className="text-xl font-black">{scanResult.message}</h3>
 
             {scanResult.ticket && (
               <div className="mt-3 text-xs text-left bg-black/60 p-3.5 rounded-xl space-y-1.5 border border-zinc-800">
-                <p><span className="text-zinc-500">Participant :</span> <strong>{scanResult.ticket.customer_name || 'Invité'}</strong></p>
-                <p><span className="text-zinc-500">Formule :</span> <strong className="text-amber-400">{scanResult.ticket.ticket_type || 'PASS'}</strong></p>
+                <p><span className="text-zinc-500">Participant :</span> <strong>{scanResult.ticket.customer_name}</strong></p>
+                <p><span className="text-zinc-500">Formule :</span> <strong className="text-amber-400">{scanResult.ticket.ticket_type}</strong></p>
                 <p><span className="text-zinc-500">Code :</span> <strong className="font-mono text-zinc-200">{scanResult.ticket.ticket_code}</strong></p>
-                <p><span className="text-zinc-500">Statut :</span> <strong className={scanResult.alreadyUsed ? 'text-red-400 font-black' : 'text-emerald-400 font-black'}>{scanResult.ticket.status}</strong></p>
+                <p>
+                  <span className="text-zinc-500">Statut :</span>{' '}
+                  <strong className={scanResult.status === 'ALREADY_USED' ? 'text-red-400 font-black' : 'text-emerald-400 font-black'}>
+                    {scanResult.status === 'ALREADY_USED' ? 'DÉJÀ ENTRÉ' : 'VALIDE'}
+                  </strong>
+                </p>
               </div>
             )}
 
             <button
               onClick={handleNextScan}
-              className="mt-4 w-full bg-white text-black font-bold py-3 rounded-xl text-sm hover:bg-zinc-200 transition"
+              className="mt-4 w-full bg-white text-black font-bold py-2.5 rounded-xl text-sm hover:bg-zinc-200 transition"
             >
               Scanner le billet suivant
             </button>
@@ -159,7 +168,7 @@ export default function ScanPage() {
 
         {/* SAISIE MANUELLE */}
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl space-y-2">
-          <label className="text-xs text-zinc-400">Ou saisir le code manuellement :</label>
+          <label className="text-xs text-zinc-400">Ou saisie manuelle :</label>
           <div className="flex gap-2">
             <input
               type="text"
