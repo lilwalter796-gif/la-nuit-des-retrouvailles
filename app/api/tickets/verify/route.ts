@@ -13,7 +13,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Identifiant manquant' }, { status: 400 });
     }
 
-    // 1. Chercher dans Supabase
+    // 1. Supabase
     let query = supabaseAdmin.from('tickets').select('*');
     if (code) {
       query = query.eq('ticket_code', code);
@@ -22,12 +22,11 @@ export async function GET(req: Request) {
     }
 
     const { data: existingTicket } = await query.maybeSingle();
-
     if (existingTicket) {
       return NextResponse.json({ ticket: existingTicket });
     }
 
-    // 2. Si non trouvé et qu'on a le sessionId Stripe, récupérer la session et créer le billet
+    // 2. Stripe direct
     if (sessionId) {
       const session = await stripe.checkout.sessions.retrieve(sessionId);
 
@@ -58,14 +57,12 @@ export async function GET(req: Request) {
           return NextResponse.json({ error: 'Erreur lors de la création du billet' }, { status: 500 });
         }
 
-        // Envoi email Resend
         if (customerEmail) {
           sendTicketEmail({
             toEmail: customerEmail,
             customerName: customerName,
             ticketCode: ticketCode,
             ticketType: ticketType,
-            siteUrl: process.env.NEXT_PUBLIC_SITE_URL || 'https://la-nuit-des-retrouvailles.vercel.app',
           }).catch(console.error);
         }
 
