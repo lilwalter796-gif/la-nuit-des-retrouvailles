@@ -3,52 +3,40 @@ import { stripe } from '@/lib/stripe';
 
 export async function POST(req: Request) {
   try {
-    const { quantity, firstName, lastName, email, phone } = await req.json();
+    const { ticketType, quantity, customerName, customerEmail, phone } = await req.json();
 
-    if (!quantity || !firstName || !lastName || !email || !phone) {
-      return NextResponse.json(
-        { error: 'Veuillez remplir toutes les informations requises.' },
-        { status: 400 }
-      );
-    }
-
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+    const unitAmount = ticketType === 'VIP' ? 5000 : 2000; // 20€ ou 50€ en centimes
 
     const session = await stripe.checkout.sessions.create({
-      customer_email: email,
+      payment_method_types: ['card'],
       line_items: [
         {
           price_data: {
             currency: 'eur',
             product_data: {
-              name: 'La Nuit des Retrouvailles — Prévente',
-              description: 'Entrée + 1 Conso incluse • 17 Octobre 2026 à Parma',
-              tax_code: 'txcd_10501000', // Code fiscal Stripe officiel pour les billets de spectacle / concert
+              name: `La Nuit des Retrouvailles - ${ticketType || 'ENTRÉE SIMPLE + CONSO'}`,
+              description: 'Accès 1 personne • 17.10.2026 à Parma',
             },
-            unit_amount: 2000, // 20.00 €
+            unit_amount: unitAmount,
           },
-          quantity: Number(quantity),
+          quantity: quantity || 1,
         },
       ],
       mode: 'payment',
-      success_url: `${siteUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${siteUrl}/#billets`,
+      customer_email: customerEmail,
       metadata: {
-        firstName,
-        lastName,
-        email,
-        phone,
-        quantity: String(quantity),
-        eventId: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d',
+        ticket_type: ticketType || 'STANDARD',
+        quantity: String(quantity || 1),
+        customer_name: customerName,
+        phone: phone || '',
       },
+      success_url: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://la-nuit-des-retrouvailles.vercel.app'}/ticket?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://la-nuit-des-retrouvailles.vercel.app'}`,
     });
 
     return NextResponse.json({ url: session.url });
-  } catch (error: any) {
-    console.error('Erreur Stripe Checkout:', error);
-    return NextResponse.json(
-      { error: error.message || 'Erreur lors de la création de la session Stripe' },
-      { status: 500 }
-    );
+  } catch (err: any) {
+    console.error('Erreur Stripe Checkout:', err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
