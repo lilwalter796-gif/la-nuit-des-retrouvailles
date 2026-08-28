@@ -8,7 +8,7 @@ export async function POST(req: Request) {
     const unitAmount = ticketType === 'VIP' ? 5000 : 2000; // 20€ ou 50€ en centimes
 
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
+      // NE PAS METTRE payment_method_types ici (géré automatiquement par Stripe)
       line_items: [
         {
           price_data: {
