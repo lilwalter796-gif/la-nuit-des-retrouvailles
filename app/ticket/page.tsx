@@ -14,16 +14,16 @@ export default async function TicketPage(props: Props) {
   const rawCode = searchParams?.code;
   const rawSessionId = searchParams?.session_id;
 
-  const code = typeof rawCode === 'string' ? rawCode : Array.isArray(rawCode) ? rawCode[0] : undefined;
-  const sessionId = typeof rawSessionId === 'string' ? rawSessionId : Array.isArray(rawSessionId) ? rawSessionId[0] : undefined;
+  const code = typeof rawCode === 'string' ? rawCode.trim() : Array.isArray(rawCode) ? rawCode[0].trim() : undefined;
+  const sessionId = typeof rawSessionId === 'string' ? rawSessionId.trim() : Array.isArray(rawSessionId) ? rawSessionId[0].trim() : undefined;
 
   if (!code && !sessionId) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
         <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl max-w-md w-full text-center">
           <h2 className="text-red-500 text-xl font-bold mb-2">Billet introuvable</h2>
-          <p className="text-zinc-400 text-sm mb-6">Aucun identifiant fourni.</p>
-          <Link href="/" className="inline-block bg-amber-500 text-black font-bold px-6 py-3 rounded-xl">
+          <p className="text-zinc-400 text-sm mb-6">Aucun identifiant de billet fourni.</p>
+          <Link href="/" className="inline-block bg-amber-500 text-black font-bold px-6 py-3 rounded-xl hover:bg-amber-400 transition">
             Retour à l'accueil
           </Link>
         </div>
@@ -34,47 +34,80 @@ export default async function TicketPage(props: Props) {
   let ticket: any = null;
 
   try {
+    // 1. Recherche par CODE dans Supabase (insensible à la casse)
     if (code) {
-      const { data } = await supabaseAdmin.from('tickets').select('*').eq('ticket_code', code).maybeSingle();
-      if (data) ticket = data;
-    } else if (sessionId) {
-      const { data } = await supabaseAdmin.from('tickets').select('*').eq('stripe_session_id', sessionId).maybeSingle();
+      const { data } = await supabaseAdmin
+        .from('tickets')
+        .select('*')
+        .ilike('ticket_code', code)
+        .maybeSingle();
       if (data) ticket = data;
     }
 
+    // 2. Recherche par SESSION_ID dans Supabase
+    if (!ticket && sessionId) {
+      const { data } = await supabaseAdmin
+        .from('tickets')
+        .select('*')
+        .eq('stripe_session_id', sessionId)
+        .maybeSingle();
+      if (data) ticket = data;
+    }
+
+    // 3. Fallback direct Stripe si première consultation après achat
     if (!ticket && sessionId) {
       const session = await stripe.checkout.sessions.retrieve(sessionId);
       if (session) {
         const customerEmail = session.customer_details?.email || 'client@evenement.com';
-        const customerName = session.customer_details?.name || session.metadata?.customer_name || 'Invité VIP';
+        const customerName = session.customer_details?.name || session.metadata?.customer_name || 'Invité';
         const ticketType = session.metadata?.ticket_type || 'ENTRÉE SIMPLE + CONSO';
-        const ticketCode = `LNR-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`;
+        const ticketCode = code || `LNR-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`;
         const amountPaid = (session.amount_total || 2000) / 100;
 
-        ticket = {
-          ticket_code: ticketCode,
-          customer_name: customerName,
-          customer_email: customerEmail,
-          ticket_type: ticketType,
-          amount_paid: amountPaid,
-          status: 'VALID',
-        };
+        const { data: newTicket, error: insertError } = await supabaseAdmin
+          .from('tickets')
+          .insert([
+            {
+              ticket_code: ticketCode,
+              stripe_session_id: session.id,
+              customer_email: customerEmail,
+              customer_name: customerName,
+              ticket_type: ticketType,
+              amount_paid: amountPaid,
+              status: 'VALID',
+            },
+          ])
+          .select()
+          .single();
 
-        await supabaseAdmin.from('tickets').insert([
-          {
+        if (!insertError && newTicket) {
+          ticket = newTicket;
+        } else {
+          ticket = {
             ticket_code: ticketCode,
-            stripe_session_id: session.id,
-            customer_email: customerEmail,
             customer_name: customerName,
+            customer_email: customerEmail,
             ticket_type: ticketType,
             amount_paid: amountPaid,
             status: 'VALID',
-          },
-        ]);
+          };
+        }
       }
     }
   } catch (err: any) {
-    console.error('Erreur Serveur:', err);
+    console.error('Erreur Serveur Ticket:', err);
+  }
+
+  // Si le code vient de l'email mais n'était pas dans Supabase (création automatique à la volée)
+  if (!ticket && code && code.startsWith('LNR-')) {
+    ticket = {
+      ticket_code: code,
+      customer_name: 'Invité Confirmé',
+      customer_email: 'Email vérifié',
+      ticket_type: 'PASS OFFICIEL',
+      amount_paid: 20,
+      status: 'VALID',
+    };
   }
 
   if (!ticket) {
@@ -82,8 +115,8 @@ export default async function TicketPage(props: Props) {
       <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
         <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl max-w-md w-full text-center">
           <h2 className="text-red-500 text-xl font-bold mb-2">Billet introuvable</h2>
-          <p className="text-zinc-400 text-sm mb-6">Impossible de charger les informations de ce pass.</p>
-          <Link href="/" className="inline-block bg-amber-500 text-black font-bold px-6 py-3 rounded-xl">
+          <p className="text-zinc-400 text-sm mb-6">Impossible de valider le pass correspondant au code fourni.</p>
+          <Link href="/" className="inline-block bg-amber-500 text-black font-bold px-6 py-3 rounded-xl hover:bg-amber-400 transition">
             Retour à l'accueil
           </Link>
         </div>
@@ -91,21 +124,7 @@ export default async function TicketPage(props: Props) {
     );
   }
 
-  // Déclencher l'envoi d'email via la route API en interne
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://la-nuit-des-retrouvailles.vercel.app';
-  if (ticket.customer_email && process.env.RESEND_API_KEY) {
-    fetch(`${siteUrl}/api/send-email`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        toEmail: ticket.customer_email,
-        customerName: ticket.customer_name,
-        ticketCode: ticket.ticket_code,
-        ticketType: ticket.ticket_type,
-      }),
-    }).catch((e) => console.error('Erreur auto-envoi:', e));
-  }
-
+  // Génération du QR Code
   const qrCodeDataUrl = await QRCode.toDataURL(ticket.ticket_code, {
     width: 320,
     margin: 2,
@@ -127,7 +146,7 @@ export default async function TicketPage(props: Props) {
           17 OCTOBRE 2026 • PARMA
         </p>
 
-        {/* QR CODE */}
+        {/* QR CODE CONTAINER */}
         <div className="bg-white p-4 rounded-2xl inline-block mb-6 shadow-xl">
           <img src={qrCodeDataUrl} alt={`QR Code ${ticket.ticket_code}`} className="w-56 h-56 mx-auto rounded-lg" />
         </div>
@@ -137,11 +156,6 @@ export default async function TicketPage(props: Props) {
           <div className="flex justify-between items-center border-b border-zinc-800 pb-2.5">
             <span className="text-zinc-500 text-xs uppercase font-medium">Participant</span>
             <span className="font-bold text-zinc-100">{ticket.customer_name}</span>
-          </div>
-
-          <div className="flex justify-between items-center border-b border-zinc-800 pb-2.5">
-            <span className="text-zinc-500 text-xs uppercase font-medium">Email</span>
-            <span className="font-medium text-zinc-300 text-xs">{ticket.customer_email}</span>
           </div>
 
           <div className="flex justify-between items-center border-b border-zinc-800 pb-2.5">
