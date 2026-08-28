@@ -7,8 +7,8 @@ export async function POST(req: Request) {
 
     const unitAmount = ticketType === 'VIP' ? 5000 : 2000; // 20€ ou 50€ en centimes
 
+    // @ts-ignore
     const session = await stripe.checkout.sessions.create({
-      // NE PAS METTRE payment_method_types ici (géré automatiquement par Stripe)
       line_items: [
         {
           price_data: {
@@ -16,6 +16,7 @@ export async function POST(req: Request) {
             product_data: {
               name: `La Nuit des Retrouvailles - ${ticketType || 'ENTRÉE SIMPLE + CONSO'}`,
               description: 'Accès 1 personne • 17.10.2026 à Parma',
+              tax_code: 'txcd_10000000', // Code taxe standard service/événement
             },
             unit_amount: unitAmount,
           },
@@ -29,6 +30,11 @@ export async function POST(req: Request) {
         quantity: String(quantity || 1),
         customer_name: customerName,
         phone: phone || '',
+      },
+      // Désactive l'obligation stricte des Managed Payments pour cette session
+      // @ts-ignore
+      managed_payments: {
+        enabled: false,
       },
       success_url: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://la-nuit-des-retrouvailles.vercel.app'}/ticket?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://la-nuit-des-retrouvailles.vercel.app'}`,
