@@ -10,7 +10,7 @@ export default function ScanPage() {
   const [scanResult, setScanResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [manualCode, setManualCode] = useState('');
-  const [cameraActive, setCameraActive] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
 
   const handleLogin = (e: React.FormEvent) => {
@@ -23,21 +23,28 @@ export default function ScanPage() {
   };
 
   const verifyTicket = async (code: string) => {
-    if (!code || loading) return;
+    if (!code || loading || isPaused) return;
     setLoading(true);
+    setIsPaused(true);
+
     try {
       const res = await fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, pin: '8520' }),
+        body: JSON.stringify({ code: code.trim(), pin: '8520' }),
       });
       const data = await res.json();
       setScanResult(data);
     } catch (err) {
-      setScanResult({ success: false, message: 'Erreur réseau lors de la vérification' });
+      setScanResult({ success: false, message: 'Erreur de connexion au serveur' });
     } finally {
       setLoading(false);
     }
+  };
+
+  const resumeScan = () => {
+    setScanResult(null);
+    setIsPaused(false);
   };
 
   useEffect(() => {
@@ -58,9 +65,8 @@ export default function ScanPage() {
         },
         () => {}
       )
-      .then(() => setCameraActive(true))
       .catch((err) => {
-        console.warn('Erreur accès caméra:', err);
+        console.warn('Erreur caméra:', err);
       });
 
     return () => {
@@ -101,38 +107,52 @@ export default function ScanPage() {
             <h2 className="font-bold text-sm text-amber-400">SCANNER ENTRÉE</h2>
             <p className="text-xs text-zinc-400">La Nuit des Retrouvailles</p>
           </div>
-          <button onClick={() => setScanResult(null)} className="text-xs bg-zinc-800 hover:bg-zinc-700 px-3 py-1.5 rounded-lg text-zinc-300">
-            Nouveau Scan
+          <button
+            onClick={resumeScan}
+            className="text-xs bg-amber-500 text-black font-bold px-3 py-1.5 rounded-lg hover:bg-amber-400 transition"
+          >
+            Scanner Suivant
           </button>
         </div>
 
-        {/* CADRE SCANNER CAMÉRA */}
-        <div className="relative rounded-3xl overflow-hidden border-2 border-dashed border-amber-500/50 bg-black min-h-[300px] flex items-center justify-center">
+        {/* CADRE SCANNER */}
+        <div className="relative rounded-3xl overflow-hidden border-2 border-dashed border-amber-500/50 bg-black min-h-[280px] flex items-center justify-center">
           <div id="reader" className="w-full"></div>
           {loading && (
             <div className="absolute inset-0 bg-black/80 flex items-center justify-center text-amber-400 font-bold z-10">
-              Vérification en cours...
+              Vérification...
             </div>
           )}
         </div>
 
-        {/* RÉSULTAT DU SCAN */}
+        {/* RÉSULTAT SCAN VISIBLE & CLAIR */}
         {scanResult && (
-          <div className={`p-5 rounded-2xl border text-center ${
-            scanResult.success
-              ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200'
-              : scanResult.alreadyUsed
-              ? 'bg-amber-950/80 border-amber-500 text-amber-200'
-              : 'bg-red-950/80 border-red-500 text-red-200'
-          }`}>
-            <h3 className="text-lg font-black">{scanResult.message}</h3>
+          <div
+            className={`p-5 rounded-2xl border text-center transition-all ${
+              scanResult.success
+                ? 'bg-emerald-950/90 border-emerald-500 text-emerald-100 shadow-[0_0_20px_rgba(16,185,129,0.3)]'
+                : scanResult.alreadyUsed
+                ? 'bg-red-950/95 border-red-500 text-red-100 shadow-[0_0_25px_rgba(239,68,68,0.5)]'
+                : 'bg-zinc-900 border-zinc-700 text-zinc-300'
+            }`}
+          >
+            <h3 className="text-lg font-black tracking-wide">{scanResult.message}</h3>
+
             {scanResult.ticket && (
-              <div className="mt-3 text-xs text-left bg-black/50 p-3 rounded-xl space-y-1">
-                <p><strong>Nom :</strong> {scanResult.ticket.customer_name}</p>
-                <p><strong>Formule :</strong> {scanResult.ticket.ticket_type}</p>
-                <p><strong>Code :</strong> {scanResult.ticket.ticket_code}</p>
+              <div className="mt-3 text-xs text-left bg-black/60 p-3.5 rounded-xl space-y-1.5 border border-zinc-800">
+                <p><span className="text-zinc-500">Participant :</span> <strong>{scanResult.ticket.customer_name}</strong></p>
+                <p><span className="text-zinc-500">Formule :</span> <strong className="text-amber-400">{scanResult.ticket.ticket_type}</strong></p>
+                <p><span className="text-zinc-500">Code :</span> <strong className="font-mono text-zinc-200">{scanResult.ticket.ticket_code}</strong></p>
+                <p><span className="text-zinc-500">Statut actuel :</span> <strong className={scanResult.alreadyUsed ? 'text-red-400 uppercase' : 'text-emerald-400 uppercase'}>{scanResult.ticket.status}</strong></p>
               </div>
             )}
+
+            <button
+              onClick={resumeScan}
+              className="mt-4 w-full bg-white text-black font-bold py-2.5 rounded-xl text-xs hover:bg-zinc-200 transition"
+            >
+              Scanner le billet suivant
+            </button>
           </div>
         )}
 
@@ -158,7 +178,7 @@ export default function ScanPage() {
       </div>
 
       <div className="pt-6">
-        <Link href="/" className="block text-center text-zinc-500 text-xs py-2">
+        <Link href="/" className="block text-center text-zinc-500 text-xs py-2 hover:text-zinc-300">
           ← Revenir au site principal
         </Link>
       </div>
