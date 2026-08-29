@@ -9,28 +9,38 @@ export async function POST(req: Request) {
     const { code, pin } = body;
 
     if (pin !== '8520') {
-      return NextResponse.json({ status: 'INVALID', message: 'Code PIN incorrect' }, { status: 401 });
+      return NextResponse.json({ status: 'INVALID', message: 'Code PIN incorrect' });
     }
 
     if (!code) {
-      return NextResponse.json({ status: 'INVALID', message: 'Aucun code fourni' }, { status: 400 });
+      return NextResponse.json({ status: 'INVALID', message: 'Aucun code fourni' });
     }
 
-    let cleanCode = String(code).trim();
-    if (cleanCode.includes('code=')) {
-      cleanCode = cleanCode.split('code=')[1].split('&')[0];
-    } else if (cleanCode.includes('/ticket/')) {
-      cleanCode = cleanCode.split('/ticket/')[1].split('?')[0];
+    // Nettoyage complet : retrait de TOUS les espaces, conversion majuscules
+    let rawStr = String(code).replace(/\s+/g, '').toUpperCase();
+
+    if (rawStr.includes('CODE=')) {
+      rawStr = rawStr.split('CODE=')[1].split('&')[0];
+    } else if (rawStr.includes('/TICKET/')) {
+      rawStr = rawStr.split('/TICKET/')[1].split('?')[0];
     }
 
-    // 1. Recherche dans Supabase
-    const { data: ticket } = await supabaseAdmin
+    // 1. Recherche par code exact ou variations O / 0
+    const codeVariant1 = rawStr;
+    const codeVariant2 = rawStr.replace(/O/g, '0');
+    const codeVariant3 = rawStr.replace(/0/g, 'O');
+
+    const { data: ticket, error: fetchError } = await supabaseAdmin
       .from('tickets')
       .select('*')
-      .ilike('ticket_code', cleanCode)
+      .or(`ticket_code.eq.${codeVariant1},ticket_code.eq.${codeVariant2},ticket_code.eq.${codeVariant3}`)
       .maybeSingle();
 
-    // 2. Si le billet existe en base
+    if (fetchError) {
+      console.error('Erreur Supabase:', fetchError);
+    }
+
+    // 2. Si le billet existe déjà en base
     if (ticket) {
       const isUsed = String(ticket.status).toUpperCase() === 'USED';
 
@@ -43,7 +53,6 @@ export async function POST(req: Request) {
         });
       }
 
-      // Marquer comme USED avec horodatage
       const now = new Date().toISOString();
       await supabaseAdmin
         .from('tickets')
@@ -58,11 +67,11 @@ export async function POST(req: Request) {
       });
     }
 
-    // 3. Si le billet est généré (LNR-...) mais non présent
-    if (cleanCode.startsWith('LNR-')) {
+    // 3. Si le billet commence par LNR- et est scanné pour la première fois
+    if (rawStr.startsWith('LNR-')) {
       const now = new Date().toISOString();
       const newTicket = {
-        ticket_code: cleanCode,
+        ticket_code: rawStr,
         customer_name: 'Invité Confirmé',
         customer_email: 'Validé sur place',
         ticket_type: 'PASS OFFICIEL',
@@ -83,11 +92,11 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       status: 'INVALID',
-      message: '❌ Billet non reconnu / Invalide',
+      message: '❌ Billet non reconnu',
     });
 
   } catch (err: any) {
-    console.error('Erreur API Scan:', err);
-    return NextResponse.json({ status: 'INVALID', message: 'Erreur serveur interne' }, { status: 500 });
+    console.error('Erreur route scan:', err);
+    return NextResponse.json({ status: 'INVALID', message: 'Erreur serveur' });
   }
 }
