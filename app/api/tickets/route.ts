@@ -24,28 +24,45 @@ function generateRandomCode(): string {
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const code = searchParams.get('code');
+    const rawCode = searchParams.get('code');
     const sessionId = searchParams.get('session_id');
 
-    // 1. Recherche par code du billet (depuis le lien dans l'email)
-    if (code) {
-      const cleanCode = code.trim();
+    // 1. RECHERCHE PAR CODE DU BILLET (Lien cliqué dans l'email)
+    if (rawCode) {
+      const code = rawCode.trim().toUpperCase();
+
+      // Recherche prioritaire exacte et insensible à la casse
       const { data: ticket, error } = await supabaseAdmin
         .from('tickets')
         .select('*')
-        .ilike('ticket_code', cleanCode)
+        .or(`ticket_code.eq.${code},ticket_code.ilike.${code}`)
         .maybeSingle();
 
       if (ticket) {
         return NextResponse.json({ ticket });
       }
+
+      // Si non trouvé par égalité stricte, recherche par similarité
+      const { data: fallbackTicket } = await supabaseAdmin
+        .from('tickets')
+        .select('*')
+        .ilike('ticket_code', `%${code}%`)
+        .limit(1)
+        .maybeSingle();
+
+      if (fallbackTicket) {
+        return NextResponse.json({ ticket: fallbackTicket });
+      }
+
+      console.warn(`⚠️ Billet non trouvé avec le code: ${code}`);
+      return NextResponse.json({ ticket: null, message: 'Billet non trouvé' }, { status: 404 });
     }
 
-    // 2. Traitement immédiat après paiement Stripe (session_id)
+    // 2. RECHERCHE / CRÉATION APRÈS PAIEMENT STRIPE (session_id)
     if (sessionId) {
       const cleanSessionId = sessionId.trim();
 
-      // Vérifier si le billet existe déjà
+      // Vérifier si le billet a déjà été enregistré
       const { data: existingTicket } = await supabaseAdmin
         .from('tickets')
         .select('*')
@@ -56,11 +73,11 @@ export async function GET(req: Request) {
         return NextResponse.json({ ticket: existingTicket });
       }
 
-      // Récupérer la session auprès de Stripe
+      // Récupération de la session auprès de Stripe
       const session = await stripe.checkout.sessions.retrieve(cleanSessionId);
 
       if (session.payment_status === 'paid') {
-        const customerEmail = session.customer_details?.email || session.customer_email || '';
+        const customerEmail = session.customer_details?.email || session.customer_email || session.metadata?.customer_email || '';
         const customerName = session.metadata?.customer_name || session.customer_details?.name || 'Participant Confirmé';
         const amountPaid = (session.amount_total || 0) / 100;
         const ticketType = session.metadata?.ticket_type || 'ENTRÉE SIMPLE + CONSO';
@@ -80,18 +97,22 @@ export async function GET(req: Request) {
         };
 
         // Sauvegarde dans Supabase
-        await supabaseAdmin.from('tickets').insert([newTicket]);
+        const { error: insertError } = await supabaseAdmin.from('tickets').insert([newTicket]);
+        if (insertError) {
+          console.error('Erreur Supabase insert:', insertError);
+        }
 
-        // Envoi de l'email avec la bonne date (17 Octobre 2026) et la vraie formule
+        // Envoi de l'email officiel avec le bon lien
         if (customerEmail) {
-          const ticketUrl = `https://la-nuit-des-retrouvailles.vercel.app/ticket?code=${ticketCode}`;
+          const origin = 'https://la-nuit-des-retrouvailles.vercel.app';
+          const ticketUrl = `${origin}/ticket?code=${ticketCode}`;
           const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(ticketCode)}&margin=10`;
 
           try {
             await resend.emails.send({
               from: 'La Nuit des Retrouvailles <onboarding@resend.dev>',
               to: [customerEmail],
-              subject: `🎟️ Votre Billet [${ticketCode}] — La Nuit des Retrouvailles`,
+              subject: `🎟️ Votre Billet Officiel [${ticketCode}] — La Nuit des Retrouvailles`,
               html: `
                 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #070707; color: #ffffff; padding: 30px; border-radius: 20px; border: 1px solid #d97706;">
                   <div style="text-align: center; margin-bottom: 25px;">
@@ -102,7 +123,7 @@ export async function GET(req: Request) {
 
                   <div style="background-color: #141414; border-radius: 14px; padding: 20px; margin-bottom: 25px; border: 1px solid #262626;">
                     <p style="margin: 0 0 10px 0; font-size: 14px; color: #d4d4d8;">Bonjour <strong>${customerName}</strong>,</p>
-                    <p style="margin: 0; font-size: 13px; color: #a1a1aa; line-height: 1.5;">Votre réservation a été validée. Voici votre billet d'entrée :</p>
+                    <p style="margin: 0; font-size: 13px; color: #a1a1aa; line-height: 1.5;">Votre commande est confirmée. Voici votre pass officiel à présenter à l'entrée :</p>
                     
                     <div style="margin-top: 15px; border-top: 1px dashed #3f3f46; padding-top: 15px;">
                       <p style="margin: 4px 0; font-size: 13px;"><strong>Titulaire :</strong> ${customerName}</p>
@@ -119,8 +140,8 @@ export async function GET(req: Request) {
                   </div>
 
                   <div style="text-align: center; margin-bottom: 20px;">
-                    <a href="${ticketUrl}" style="background-color: #f59e0b; color: #000000; text-decoration: none; padding: 14px 28px; font-size: 14px; font-weight: bold; border-radius: 10px; display: inline-block; text-transform: uppercase;">
-                      📥 Télécharger mon Pass (PDF)
+                    <a href="${ticketUrl}" target="_blank" style="background-color: #f59e0b; color: #000000; text-decoration: none; padding: 14px 28px; font-size: 14px; font-weight: bold; border-radius: 10px; display: inline-block; text-transform: uppercase;">
+                      📥 Voir & Télécharger mon Pass (PDF)
                     </a>
                   </div>
 
@@ -130,8 +151,9 @@ export async function GET(req: Request) {
                 </div>
               `,
             });
+            console.log(`✅ Email envoyé avec succès à ${customerEmail}`);
           } catch (emailErr) {
-            console.error('Erreur envoi email:', emailErr);
+            console.error('Erreur Resend:', emailErr);
           }
         }
 
@@ -142,6 +164,6 @@ export async function GET(req: Request) {
     return NextResponse.json({ ticket: null }, { status: 404 });
   } catch (err: any) {
     console.error('Erreur API tickets:', err);
-    return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
+    return NextResponse.json({ error: 'Erreur interne' }, { status: 500 });
   }
 }
