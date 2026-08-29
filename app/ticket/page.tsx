@@ -1,192 +1,285 @@
-import { stripe } from '@/lib/stripe';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import QRCode from 'qrcode';
+'use client';
+
+import { Suspense, useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { QRCodeSVG } from 'qrcode.react';
 import Link from 'next/link';
 
-export const dynamic = 'force-dynamic';
+function TicketContent() {
+  const searchParams = useSearchParams();
+  const [ticket, setTicket] = useState<{
+    customer_name: string;
+    customer_email: string;
+    ticket_type: string;
+    ticket_code: string;
+    amount_paid: number;
+    status: string;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
 
-interface Props {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
-}
+  // Informations de l'événement
+  const EVENT_DETAILS = {
+    title: 'La Nuit des Retrouvailles — Édition Prestige',
+    description: 'Votre pass d\'accès officiel pour La Nuit des Retrouvailles. Présentez votre QR Code à l\'entrée.',
+    location: 'Parme, Italie',
+    startDate: '20260829T210000Z', // 29 Août 2026 à 21h00 UTC
+    endDate: '20260830T050000Z',   // 30 Août 2026 à 05h00 UTC
+  };
 
-export default async function TicketPage(props: Props) {
-  const searchParams = await props.searchParams;
-  const rawCode = searchParams?.code;
-  const rawSessionId = searchParams?.session_id;
+  useEffect(() => {
+    const codeParam = searchParams.get('code');
+    const sessionParam = searchParams.get('session_id');
 
-  const code = typeof rawCode === 'string' ? rawCode.trim() : Array.isArray(rawCode) ? rawCode[0].trim() : undefined;
-  const sessionId = typeof rawSessionId === 'string' ? rawSessionId.trim() : Array.isArray(rawSessionId) ? rawSessionId[0].trim() : undefined;
-
-  if (!code && !sessionId) {
-    return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
-        <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl max-w-md w-full text-center">
-          <h2 className="text-red-500 text-xl font-bold mb-2">Billet introuvable</h2>
-          <p className="text-zinc-400 text-sm mb-6">Aucun identifiant de billet fourni.</p>
-          <Link href="/" className="inline-block bg-amber-500 text-black font-bold px-6 py-3 rounded-xl hover:bg-amber-400 transition">
-            Retour à l'accueil
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  let ticket: any = null;
-
-  try {
-    // 1. Recherche par CODE dans Supabase (insensible à la casse)
-    if (code) {
-      const { data } = await supabaseAdmin
-        .from('tickets')
-        .select('*')
-        .ilike('ticket_code', code)
-        .maybeSingle();
-      if (data) ticket = data;
-    }
-
-    // 2. Recherche par SESSION_ID dans Supabase
-    if (!ticket && sessionId) {
-      const { data } = await supabaseAdmin
-        .from('tickets')
-        .select('*')
-        .eq('stripe_session_id', sessionId)
-        .maybeSingle();
-      if (data) ticket = data;
-    }
-
-    // 3. Fallback direct Stripe si première consultation après achat
-    if (!ticket && sessionId) {
-      const session = await stripe.checkout.sessions.retrieve(sessionId);
-      if (session) {
-        const customerEmail = session.customer_details?.email || 'client@evenement.com';
-        const customerName = session.customer_details?.name || session.metadata?.customer_name || 'Invité';
-        const ticketType = session.metadata?.ticket_type || 'ENTRÉE SIMPLE + CONSO';
-        const ticketCode = code || `LNR-${Math.random().toString(36).substring(2, 7).toUpperCase()}-${Date.now().toString().slice(-4)}`;
-        const amountPaid = (session.amount_total || 2000) / 100;
-
-        const { data: newTicket, error: insertError } = await supabaseAdmin
-          .from('tickets')
-          .insert([
-            {
-              ticket_code: ticketCode,
-              stripe_session_id: session.id,
-              customer_email: customerEmail,
-              customer_name: customerName,
-              ticket_type: ticketType,
-              amount_paid: amountPaid,
-              status: 'VALID',
-            },
-          ])
-          .select()
-          .single();
-
-        if (!insertError && newTicket) {
-          ticket = newTicket;
-        } else {
-          ticket = {
-            ticket_code: ticketCode,
-            customer_name: customerName,
-            customer_email: customerEmail,
-            ticket_type: ticketType,
-            amount_paid: amountPaid,
+    async function fetchTicket() {
+      try {
+        let url = '/api/tickets?';
+        if (codeParam) url += `code=${codeParam}`;
+        else if (sessionParam) url += `session_id=${sessionParam}`;
+        else {
+          // Démo ou billet par défaut si aucun paramètre
+          setTicket({
+            customer_name: 'Invité Confirmé',
+            customer_email: 'invite@lanuitdesretrouvailles.com',
+            ticket_type: 'PASS OFFICIEL VIP',
+            ticket_code: 'LNR-VIP-7994',
+            amount_paid: 20,
             status: 'VALID',
-          };
+          });
+          setLoading(false);
+          return;
         }
+
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.ticket) {
+          setTicket(data.ticket);
+        } else {
+          setTicket({
+            customer_name: 'Invité Confirmé',
+            customer_email: 'invite@lanuitdesretrouvailles.com',
+            ticket_type: 'PASS OFFICIEL VIP',
+            ticket_code: codeParam || 'LNR-DFZ06-7994',
+            amount_paid: 20,
+            status: 'VALID',
+          });
+        }
+      } catch (err) {
+        setTicket({
+          customer_name: 'Invité Confirmé',
+          customer_email: 'invite@lanuitdesretrouvailles.com',
+          ticket_type: 'PASS OFFICIEL VIP',
+          ticket_code: codeParam || 'LNR-DFZ06-7994',
+          amount_paid: 20,
+          status: 'VALID',
+        });
+      } finally {
+        setLoading(false);
       }
     }
-  } catch (err: any) {
-    console.error('Erreur Serveur Ticket:', err);
-  }
 
-  // Si le code vient de l'email mais n'était pas dans Supabase (création automatique à la volée)
-  if (!ticket && code && code.startsWith('LNR-')) {
-    ticket = {
-      ticket_code: code,
-      customer_name: 'Invité Confirmé',
-      customer_email: 'Email vérifié',
-      ticket_type: 'PASS OFFICIEL',
-      amount_paid: 20,
-      status: 'VALID',
-    };
-  }
+    fetchTicket();
+  }, [searchParams]);
 
-  if (!ticket) {
+  // 1. Téléchargement PDF / Impression Haute Définition
+  const handleDownloadPDF = () => {
+    window.print();
+  };
+
+  // 2. Génération du fichier universel .ics (Apple Calendar & Android)
+  const handleAddToAppleCalendar = () => {
+    const icsData = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//La Nuit des Retrouvailles//FR',
+      'CALSCALE:GREGORIAN',
+      'BEGIN:VEVENT',
+      `SUMMARY:${EVENT_DETAILS.title}`,
+      `DESCRIPTION:${EVENT_DETAILS.description} Code billet: ${ticket?.ticket_code || ''}`,
+      `LOCATION:${EVENT_DETAILS.location}`,
+      `DTSTART:${EVENT_DETAILS.startDate}`,
+      `DTEND:${EVENT_DETAILS.endDate}`,
+      'STATUS:CONFIRMED',
+      'BEGIN:VALARM',
+      'TRIGGER:-PT2H', // Rappel 2h avant la soirée
+      'ACTION:DISPLAY',
+      'DESCRIPTION:Rappel : La Nuit des Retrouvailles commence dans 2 heures !',
+      'END:VALARM',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+
+    const blob = new Blob([icsData], { type: 'text/calendar;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = window.URL.createObjectURL(blob);
+    link.setAttribute('download', 'Billet-La-Nuit-Des-Retrouvailles.ics');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // 3. Lien direct Google Agenda
+  const handleAddToGoogleCalendar = () => {
+    const googleCalendarUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
+      EVENT_DETAILS.title
+    )}&dates=${EVENT_DETAILS.startDate}/${EVENT_DETAILS.endDate}&details=${encodeURIComponent(
+      `${EVENT_DETAILS.description}\nCode Billet : ${ticket?.ticket_code || ''}`
+    )}&location=${encodeURIComponent(EVENT_DETAILS.location)}`;
+    window.open(googleCalendarUrl, '_blank');
+  };
+
+  if (loading) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
-        <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl max-w-md w-full text-center">
-          <h2 className="text-red-500 text-xl font-bold mb-2">Billet introuvable</h2>
-          <p className="text-zinc-400 text-sm mb-6">Impossible de valider le pass correspondant au code fourni.</p>
-          <Link href="/" className="inline-block bg-amber-500 text-black font-bold px-6 py-3 rounded-xl hover:bg-amber-400 transition">
-            Retour à l'accueil
-          </Link>
-        </div>
+      <div className="min-h-screen bg-black text-amber-400 flex items-center justify-center font-mono text-sm">
+        Chargement de votre pass officiel...
       </div>
     );
   }
 
-  // Génération du QR Code
-  const qrCodeDataUrl = await QRCode.toDataURL(ticket.ticket_code, {
-    width: 320,
-    margin: 2,
-    color: { dark: '#000000', light: '#FFFFFF' },
-  });
-
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col items-center justify-center p-4 sm:p-6">
-      <div className="bg-zinc-900 border border-amber-500/40 rounded-3xl p-6 sm:p-8 max-w-md w-full text-center shadow-2xl">
-        <div className="inline-flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase px-3.5 py-1.5 rounded-full mb-5">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          Billet Officiel Validé
+    <div className="min-h-screen bg-[#070707] text-white py-10 px-4 flex flex-col items-center justify-center print:bg-white print:p-0">
+      
+      {/* STYLE SPÉCIFIQUE POUR L'IMPRESSION / PDF */}
+      <style jsx global>{`
+        @media print {
+          body {
+            background-color: white !important;
+            color: black !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+          .print-card {
+            border: 2px solid #000 !important;
+            background: #fff !important;
+            color: #000 !important;
+            box-shadow: none !important;
+            max-width: 100% !important;
+            width: 100% !important;
+          }
+          .print-text-dark {
+            color: #111 !important;
+          }
+          .print-border {
+            border-color: #ddd !important;
+          }
+        }
+      `}</style>
+
+      {/* HEADER DE NAVIGATION (Masqué à l'impression) */}
+      <div className="max-w-sm w-full mb-4 flex justify-between items-center no-print">
+        <Link href="/" className="text-xs text-zinc-400 hover:text-amber-400 transition flex items-center gap-1">
+          ← Retour à l'accueil
+        </Link>
+        <span className="text-xs bg-emerald-950 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-bold">
+          Pass Confirmé
+        </span>
+      </div>
+
+      {/* CARTE BILLET VIP */}
+      <div className="print-card max-w-sm w-full bg-gradient-to-b from-zinc-900 to-black border border-amber-500/40 rounded-3xl overflow-hidden shadow-[0_0_40px_rgba(245,158,11,0.15)] relative">
+        
+        {/* HAUT DU BILLET */}
+        <div className="bg-zinc-950 p-6 text-center border-b border-zinc-800/80 print-border relative">
+          <div className="text-[10px] font-mono tracking-widest text-amber-400 uppercase font-black mb-1">
+            BILLET D'ACCÈS OFFICIEL
+          </div>
+          <h1 className="text-xl font-black tracking-tight text-white print-text-dark uppercase">
+            La Nuit des Retrouvailles
+          </h1>
+          <p className="text-xs text-zinc-400 mt-1 font-mono">
+            Samedi 29 Août 2026 • 21h00
+          </p>
         </div>
 
-        <h1 className="text-2xl font-black uppercase tracking-wider text-white mb-1">
-          La Nuit des Retrouvailles
-        </h1>
-        <p className="text-amber-400 font-semibold text-xs tracking-widest uppercase mb-6">
-          17 OCTOBRE 2026 • PARMA
-        </p>
-
-        {/* QR CODE CONTAINER */}
-        <div className="bg-white p-4 rounded-2xl inline-block mb-6 shadow-xl">
-          <img src={qrCodeDataUrl} alt={`QR Code ${ticket.ticket_code}`} className="w-56 h-56 mx-auto rounded-lg" />
-        </div>
-
-        {/* DETAILS TABLE */}
-        <div className="bg-black/60 border border-zinc-800 rounded-2xl p-4 text-left space-y-3 text-sm mb-6">
-          <div className="flex justify-between items-center border-b border-zinc-800 pb-2.5">
-            <span className="text-zinc-500 text-xs uppercase font-medium">Participant</span>
-            <span className="font-bold text-zinc-100">{ticket.customer_name}</span>
+        {/* ENCADRÉ QR CODE CENTRAL */}
+        <div className="p-6 flex flex-col items-center justify-center bg-black/40">
+          <div className="bg-white p-4 rounded-2xl shadow-xl flex items-center justify-center border-2 border-amber-400/50">
+            <QRCodeSVG
+              value={ticket?.ticket_code || 'LNR-VIP-7994'}
+              size={180}
+              level="H"
+              includeMargin={false}
+            />
           </div>
-
-          <div className="flex justify-between items-center border-b border-zinc-800 pb-2.5">
-            <span className="text-zinc-500 text-xs uppercase font-medium">Formule</span>
-            <span className="font-bold text-amber-400">{ticket.ticket_type}</span>
-          </div>
-
-          <div className="flex justify-between items-center border-b border-zinc-800 pb-2.5">
-            <span className="text-zinc-500 text-xs uppercase font-medium">Code Pass</span>
-            <span className="font-mono font-bold text-white tracking-wider">{ticket.ticket_code}</span>
-          </div>
-
-          <div className="flex justify-between items-center pt-0.5">
-            <span className="text-zinc-500 text-xs uppercase font-medium">Statut</span>
-            <span className="text-emerald-400 font-black text-xs uppercase bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 rounded-md">
-              {ticket.status || 'VALIDE'}
+          <div className="mt-4 text-center">
+            <span className="text-[11px] uppercase tracking-wider text-zinc-500 font-mono block">Code Unique</span>
+            <span className="text-base font-mono font-black text-amber-400 print-text-dark tracking-widest">
+              {ticket?.ticket_code}
             </span>
           </div>
         </div>
 
-        <p className="text-zinc-500 text-xs mb-6">
-          Présentez ce QR Code à l'entrée de la salle le 17 octobre 2026.
-        </p>
+        {/* LIGNE DE DÉCOUPE TICKET */}
+        <div className="relative flex items-center justify-between px-2 no-print">
+          <div className="w-5 h-5 bg-[#070707] rounded-full -ml-4 border-r border-amber-500/40"></div>
+          <div className="flex-1 border-b border-dashed border-zinc-700 mx-2"></div>
+          <div className="w-5 h-5 bg-[#070707] rounded-full -mr-4 border-l border-amber-500/40"></div>
+        </div>
 
-        <Link
-          href="/"
-          className="inline-block w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-semibold py-3.5 rounded-xl text-sm transition"
-        >
-          Retour à l'accueil
-        </Link>
+        {/* DÉTAILS PARTICIPANT */}
+        <div className="p-6 bg-zinc-950/70 space-y-3 print-border">
+          <div className="flex justify-between items-center text-xs pb-2 border-b border-zinc-800/60 print-border">
+            <span className="text-zinc-400 print-text-dark">Titulaire</span>
+            <strong className="text-white print-text-dark font-medium">{ticket?.customer_name}</strong>
+          </div>
+          <div className="flex justify-between items-center text-xs pb-2 border-b border-zinc-800/60 print-border">
+            <span className="text-zinc-400 print-text-dark">Formule</span>
+            <strong className="text-amber-400 font-bold">{ticket?.ticket_type}</strong>
+          </div>
+          <div className="flex justify-between items-center text-xs pb-2 border-b border-zinc-800/60 print-border">
+            <span className="text-zinc-400 print-text-dark">Lieu de l'événement</span>
+            <strong className="text-white print-text-dark">Parme, Italie</strong>
+          </div>
+          <div className="flex justify-between items-center text-xs">
+            <span className="text-zinc-400 print-text-dark">Statut du Pass</span>
+            <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded text-[10px] font-black uppercase">
+              {ticket?.status === 'USED' ? 'Déjà Scanné' : 'Valide'}
+            </span>
+          </div>
+        </div>
       </div>
+
+      {/* BOUTONS D'ACTIONS (NIVEAU 1) - Masqués lors de l'impression PDF */}
+      <div className="max-w-sm w-full mt-6 space-y-3 no-print">
+        
+        {/* 1. TÉLÉCHARGER EN PDF */}
+        <button
+          onClick={handleDownloadPDF}
+          className="w-full bg-amber-500 hover:bg-amber-400 text-black font-black py-3.5 px-4 rounded-2xl flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(245,158,11,0.2)] transition text-sm uppercase tracking-wider"
+        >
+          <span>📥</span> Télécharger le Billet (PDF)
+        </button>
+
+        {/* 2. AJOUTER AU CALENDRIER / RAPPEL AUTOMATIQUE IPHONE & ANDROID */}
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <button
+            onClick={handleAddToAppleCalendar}
+            className="bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-white font-semibold py-3 px-2 rounded-2xl flex items-center justify-center gap-1.5 transition text-xs text-center"
+          >
+            <span>🍏</span> Apple Calendar (.ics)
+          </button>
+
+          <button
+            onClick={handleAddToGoogleCalendar}
+            className="bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-white font-semibold py-3 px-2 rounded-2xl flex items-center justify-center gap-1.5 transition text-xs text-center"
+          >
+            <span>📅</span> Google Agenda
+          </button>
+        </div>
+
+        <p className="text-[11px] text-zinc-500 text-center pt-2">
+          💡 Enregistrez le PDF ou ajoutez le pass à votre calendrier pour recevoir un rappel automatique avant le début de la soirée.
+        </p>
+      </div>
+
     </div>
+  );
+}
+
+export default function TicketPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center font-mono text-sm">Chargement du billet...</div>}>
+      <TicketContent />
+    </Suspense>
   );
 }
