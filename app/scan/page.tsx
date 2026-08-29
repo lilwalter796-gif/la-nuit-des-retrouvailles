@@ -50,7 +50,7 @@ export default function ScanPage() {
       const data = await res.json();
       setScanResult(data);
     } catch (err) {
-      setScanResult({ status: 'INVALID', message: 'Erreur réseau de validation' });
+      setScanResult({ status: 'INVALID', message: 'Erreur de communication avec le serveur' });
     } finally {
       setLoading(false);
     }
@@ -81,7 +81,7 @@ export default function ScanPage() {
         () => {}
       )
       .catch((err) => {
-        console.warn('Erreur caméra:', err);
+        console.warn('Accès caméra:', err);
       });
 
     return () => {
@@ -94,8 +94,7 @@ export default function ScanPage() {
   const formatScanTime = (isoString?: string) => {
     if (!isoString) return new Date().toLocaleTimeString('fr-FR');
     try {
-      const d = new Date(isoString);
-      return d.toLocaleTimeString('fr-FR', {
+      return new Date(isoString).toLocaleTimeString('fr-FR', {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
@@ -108,9 +107,9 @@ export default function ScanPage() {
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center p-4">
-        <form onSubmit={handleLogin} className="bg-zinc-900 border border-zinc-800 p-8 rounded-3xl max-w-sm w-full text-center space-y-4">
+        <form onSubmit={handleLogin} className="bg-zinc-900 border border-zinc-800 p-8 rounded-3xl max-w-sm w-full text-center space-y-4 shadow-2xl">
           <h1 className="text-xl font-bold tracking-wider uppercase text-amber-400">Contrôle d'Accès</h1>
-          <p className="text-zinc-400 text-xs">Entrez le code PIN organisateur</p>
+          <p className="text-zinc-400 text-xs">Code PIN Organisateur Requis</p>
           <input
             type="password"
             maxLength={4}
@@ -138,9 +137,9 @@ export default function ScanPage() {
           </div>
           <button
             onClick={handleNextScan}
-            className="text-xs bg-amber-500 text-black font-bold px-3 py-1.5 rounded-lg hover:bg-amber-400 transition"
+            className="text-xs bg-amber-500 text-black font-bold px-3.5 py-1.5 rounded-lg hover:bg-amber-400 transition"
           >
-            Nouveau Scan
+            Scanner Suivant
           </button>
         </div>
 
@@ -148,24 +147,23 @@ export default function ScanPage() {
         <div className="relative rounded-3xl overflow-hidden border-2 border-dashed border-amber-500/50 bg-black min-h-[260px] flex items-center justify-center">
           <div id="reader" className="w-full"></div>
           {loading && (
-            <div className="absolute inset-0 bg-black/85 flex items-center justify-center text-amber-400 font-bold z-10">
-              Vérification du billet en cours...
+            <div className="absolute inset-0 bg-black/85 flex items-center justify-center text-amber-400 font-bold z-10 text-sm">
+              Vérification du pass en cours...
             </div>
           )}
         </div>
 
-        {/* CARTE RÉSULTAT DU SCAN */}
+        {/* CARTE D'AFFICHAGE RÉSULTAT */}
         {scanResult && (
           <div
             className={`p-6 rounded-3xl border text-center transition-all ${
               scanResult.status === 'VALID'
-                ? 'bg-emerald-950 border-emerald-500 text-white shadow-[0_0_40px_rgba(16,185,129,0.4)]'
+                ? 'bg-emerald-950/95 border-emerald-500 text-white shadow-[0_0_35px_rgba(16,185,129,0.4)]'
                 : scanResult.status === 'ALREADY_USED'
-                ? 'bg-red-950 border-red-500 text-white shadow-[0_0_50px_rgba(239,68,68,0.7)] animate-pulse'
+                ? 'bg-red-950 border-red-500 text-white shadow-[0_0_45px_rgba(239,68,68,0.7)] animate-pulse'
                 : 'bg-zinc-900 border-zinc-700 text-zinc-300'
             }`}
           >
-            {/* BADGE ÉTAT */}
             <div
               className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider mb-3 border ${
                 scanResult.status === 'VALID'
@@ -175,7 +173,7 @@ export default function ScanPage() {
                   : 'bg-zinc-800 text-zinc-300 border-zinc-600'
               }`}
             >
-              {scanResult.status === 'VALID' && '🟢 ACCÈS AUTORISÉ'}
+              {scanResult.status === 'VALID' && '🟢 ENTRÉE AUTORISÉE'}
               {scanResult.status === 'ALREADY_USED' && '🚨 ENTRÉE REFUSÉE — BILLET DÉJÀ PRÉSENTÉ'}
               {scanResult.status === 'INVALID' && '⚠️ CODE REJETÉ'}
             </div>
@@ -184,7 +182,7 @@ export default function ScanPage() {
 
             <p className="text-xs text-zinc-300 mb-4 font-mono">
               {scanResult.status === 'ALREADY_USED'
-                ? '⚠️ Billet déjà validé précédemment à :'
+                ? 'Premier scan enregistré à :'
                 : 'Heure de validation :'} {' '}
               <span className="font-bold text-white bg-black/70 px-2.5 py-1 rounded-lg border border-white/20">
                 {formatScanTime(scanResult.scannedAt || scanResult.ticket?.scanned_at)}
@@ -196,7 +194,7 @@ export default function ScanPage() {
                 <div className="flex justify-between border-b border-zinc-800 pb-1.5">
                   <span className="text-zinc-400">Participant</span>
                   <strong className="text-white text-sm">
-                    {scanResult.ticket.customer_name || 'Invité Officiel'}
+                    {scanResult.ticket.customer_name || 'Invité Confirmé'}
                   </strong>
                 </div>
 
@@ -240,7 +238,7 @@ export default function ScanPage() {
 
         {/* SAISIE MANUELLE */}
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl space-y-2">
-          <label className="text-xs text-zinc-400">Saisie manuelle du code :</label>
+          <label className="text-xs text-zinc-400">Saisie manuelle :</label>
           <div className="flex gap-2">
             <input
               type="text"
