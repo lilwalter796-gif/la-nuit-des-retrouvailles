@@ -10,7 +10,15 @@ export default function ScanPage() {
   const [scanResult, setScanResult] = useState<{
     status: 'VALID' | 'ALREADY_USED' | 'INVALID';
     message: string;
-    ticket?: any;
+    ticket?: {
+      ticket_code?: string;
+      customer_name?: string;
+      customer_email?: string;
+      ticket_type?: string;
+      amount_paid?: number;
+      status?: string;
+      scanned_at?: string;
+    };
     scannedAt?: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -42,7 +50,7 @@ export default function ScanPage() {
       const data = await res.json();
       setScanResult(data);
     } catch (err) {
-      setScanResult({ status: 'INVALID', message: 'Erreur réseau avec le serveur' });
+      setScanResult({ status: 'INVALID', message: 'Erreur réseau de validation' });
     } finally {
       setLoading(false);
     }
@@ -145,7 +153,7 @@ export default function ScanPage() {
           )}
         </div>
 
-        {/* RÉSULTAT */}
+        {/* CARTE RÉSULTAT COMPLÈTE */}
         {scanResult && (
           <div
             className={`p-6 rounded-3xl border text-center transition-all ${
@@ -159,7 +167,7 @@ export default function ScanPage() {
             <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider mb-3 bg-black/50 border border-white/10">
               {scanResult.status === 'VALID' && '🟢 Entrée Autorisée'}
               {scanResult.status === 'ALREADY_USED' && '🔴 Entrée Refusée (Déjà utilisé)'}
-              {scanResult.status === 'INVALID' && '⚠️ Code Rejeté'}
+              {scanResult.status === 'INVALID' && '⚠️ Code Non Reconnu'}
             </div>
 
             <h3 className="text-2xl font-black tracking-wide mb-1">{scanResult.message}</h3>
@@ -174,25 +182,36 @@ export default function ScanPage() {
             {scanResult.ticket && (
               <div className="text-xs text-left bg-black/60 p-4 rounded-2xl space-y-2 border border-white/10 mb-4">
                 <div className="flex justify-between border-b border-zinc-800 pb-1.5">
-                  <span className="text-zinc-400">Participant :</span>
-                  <strong className="text-white">{scanResult.ticket.customer_name}</strong>
+                  <span className="text-zinc-400">Participant</span>
+                  <strong className="text-white text-sm">
+                    {scanResult.ticket.customer_name || 'Invité Officiel'}
+                  </strong>
                 </div>
+
                 <div className="flex justify-between border-b border-zinc-800 pb-1.5">
-                  <span className="text-zinc-400">Formule :</span>
-                  <strong className="text-amber-400">{scanResult.ticket.ticket_type}</strong>
+                  <span className="text-zinc-400">Formule</span>
+                  <strong className="text-amber-400 font-bold">
+                    {scanResult.ticket.ticket_type || 'PASS OFFICIEL'}
+                  </strong>
                 </div>
+
                 <div className="flex justify-between border-b border-zinc-800 pb-1.5">
-                  <span className="text-zinc-400">Code Pass :</span>
-                  <strong className="font-mono text-zinc-200">{scanResult.ticket.ticket_code}</strong>
+                  <span className="text-zinc-400">Code Pass</span>
+                  <strong className="font-mono text-zinc-100 tracking-wider">
+                    {scanResult.ticket.ticket_code || manualCode || 'LNR-PASS'}
+                  </strong>
                 </div>
+
                 <div className="flex justify-between items-center pt-0.5">
-                  <span className="text-zinc-400">Statut actuel :</span>
-                  <span className={`font-black uppercase px-2 py-0.5 rounded text-[11px] ${
-                    scanResult.status === 'VALID'
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                      : 'bg-red-500/20 text-red-300 border border-red-500/40'
-                  }`}>
-                    {scanResult.status === 'ALREADY_USED' ? 'DÉJÀ ENTRÉ' : 'VALIDE'}
+                  <span className="text-zinc-400">Statut de validation</span>
+                  <span
+                    className={`font-black uppercase px-2.5 py-0.5 rounded text-[11px] ${
+                      scanResult.status === 'VALID'
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                        : 'bg-red-500/20 text-red-300 border border-red-500/40'
+                    }`}
+                  >
+                    {scanResult.status === 'ALREADY_USED' ? 'DÉJÀ ENTRÉ' : 'ENTRÉE VALIDÉE'}
                   </span>
                 </div>
               </div>
@@ -209,7 +228,7 @@ export default function ScanPage() {
 
         {/* SAISIE MANUELLE */}
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl space-y-2">
-          <label className="text-xs text-zinc-400">Ou saisie manuelle du code :</label>
+          <label className="text-xs text-zinc-400">Saisie manuelle du code :</label>
           <div className="flex gap-2">
             <input
               type="text"
