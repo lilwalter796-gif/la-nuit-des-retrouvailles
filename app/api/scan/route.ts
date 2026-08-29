@@ -16,24 +16,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ status: 'INVALID', message: 'Aucun code fourni' });
     }
 
-    // Nettoyage complet : retrait de TOUS les espaces, conversion majuscules
-    let rawStr = String(code).replace(/\s+/g, '').toUpperCase();
-
-    if (rawStr.includes('CODE=')) {
-      rawStr = rawStr.split('CODE=')[1].split('&')[0];
-    } else if (rawStr.includes('/TICKET/')) {
-      rawStr = rawStr.split('/TICKET/')[1].split('?')[0];
+    // Nettoyage complet du code
+    let cleanCode = String(code).replace(/\s+/g, '').toUpperCase();
+    if (cleanCode.includes('CODE=')) {
+      cleanCode = cleanCode.split('CODE=')[1].split('&')[0];
+    } else if (cleanCode.includes('/TICKET/')) {
+      cleanCode = cleanCode.split('/TICKET/')[1].split('?')[0];
     }
 
-    // 1. Recherche par code exact ou variations O / 0
-    const codeVariant1 = rawStr;
-    const codeVariant2 = rawStr.replace(/O/g, '0');
-    const codeVariant3 = rawStr.replace(/0/g, 'O');
-
+    // 1. Recherche dans Supabase
     const { data: ticket, error: fetchError } = await supabaseAdmin
       .from('tickets')
       .select('*')
-      .or(`ticket_code.eq.${codeVariant1},ticket_code.eq.${codeVariant2},ticket_code.eq.${codeVariant3}`)
+      .ilike('ticket_code', cleanCode)
       .maybeSingle();
 
     if (fetchError) {
@@ -42,9 +37,9 @@ export async function POST(req: Request) {
 
     // 2. Si le billet existe déjà en base
     if (ticket) {
-      const isUsed = String(ticket.status).toUpperCase() === 'USED';
+      const isAlreadyUsed = String(ticket.status).toUpperCase() === 'USED';
 
-      if (isUsed) {
+      if (isAlreadyUsed) {
         return NextResponse.json({
           status: 'ALREADY_USED',
           message: '⛔ BILLET DÉJÀ UTILISÉ',
@@ -53,6 +48,7 @@ export async function POST(req: Request) {
         });
       }
 
+      // Marquer comme USED
       const now = new Date().toISOString();
       await supabaseAdmin
         .from('tickets')
@@ -67,11 +63,11 @@ export async function POST(req: Request) {
       });
     }
 
-    // 3. Si le billet commence par LNR- et est scanné pour la première fois
-    if (rawStr.startsWith('LNR-')) {
+    // 3. Si le billet commence par LNR- (nouveau pass scanné pour la 1ère fois)
+    if (cleanCode.startsWith('LNR-')) {
       const now = new Date().toISOString();
       const newTicket = {
-        ticket_code: rawStr,
+        ticket_code: cleanCode,
         customer_name: 'Invité Confirmé',
         customer_email: 'Validé sur place',
         ticket_type: 'PASS OFFICIEL',
@@ -94,9 +90,8 @@ export async function POST(req: Request) {
       status: 'INVALID',
       message: '❌ Billet non reconnu',
     });
-
   } catch (err: any) {
-    console.error('Erreur route scan:', err);
+    console.error('Erreur API Scan:', err);
     return NextResponse.json({ status: 'INVALID', message: 'Erreur serveur' });
   }
 }

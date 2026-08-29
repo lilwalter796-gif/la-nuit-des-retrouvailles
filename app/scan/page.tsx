@@ -27,8 +27,8 @@ export default function ScanPage() {
     }
   };
 
-  const verifyTicket = async (code: string) => {
-    const clean = code.replace(/\s+/g, '').toUpperCase();
+  const verifyTicket = async (codeToVerify: string) => {
+    const clean = codeToVerify.replace(/\s+/g, '').toUpperCase();
     if (!clean || loading) return;
     setLoading(true);
     setIsScanningActive(false);
@@ -42,7 +42,7 @@ export default function ScanPage() {
       const data = await res.json();
       setScanResult(data);
     } catch (err) {
-      setScanResult({ status: 'INVALID', message: 'Erreur de connexion au serveur' });
+      setScanResult({ status: 'INVALID', message: 'Erreur réseau avec le serveur' });
     } finally {
       setLoading(false);
     }
@@ -209,13 +209,13 @@ export default function ScanPage() {
 
         {/* SAISIE MANUELLE */}
         <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl space-y-2">
-          <label className="text-xs text-zinc-400">Saisie manuelle du code :</label>
+          <label className="text-xs text-zinc-400">Ou saisie manuelle du code :</label>
           <div className="flex gap-2">
             <input
               type="text"
               value={manualCode}
               onChange={(e) => setManualCode(e.target.value.toUpperCase())}
-              placeholder="LNR-DFZ06-7994"
+              placeholder="LNR-XXXXX-XXXX"
               className="flex-1 bg-black border border-zinc-700 px-3 py-2 rounded-xl text-sm font-mono uppercase text-white outline-none focus:border-amber-500"
             />
             <button
