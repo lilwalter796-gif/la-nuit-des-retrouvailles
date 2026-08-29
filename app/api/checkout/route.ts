@@ -22,6 +22,7 @@ export async function POST(req: Request) {
             product_data: {
               name: `La Nuit des Retrouvailles — ${ticketType || 'Pass Entrée'}`,
               description: "Pass d'accès officiel avec QR Code",
+              tax_code: 'txcd_20030000', // Code fiscal officiel Stripe pour les billets d'accès / événements
             },
             unit_amount: Math.round((price || 20) * 100),
           },
