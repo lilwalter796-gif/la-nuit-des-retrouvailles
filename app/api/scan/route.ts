@@ -16,57 +16,69 @@ export async function POST(req: Request) {
       return NextResponse.json({ status: 'INVALID', message: 'Aucun code fourni' });
     }
 
-    // Nettoyage complet du code
-    let cleanCode = String(code).replace(/\s+/g, '').toUpperCase();
-    if (cleanCode.includes('CODE=')) {
-      cleanCode = cleanCode.split('CODE=')[1].split('&')[0];
-    } else if (cleanCode.includes('/TICKET/')) {
-      cleanCode = cleanCode.split('/TICKET/')[1].split('?')[0];
+    // 1. Nettoyage strict du code (retrait complet des espaces et formatage majuscule)
+    let rawStr = String(code).trim().replace(/\s+/g, '').toUpperCase();
+    if (rawStr.includes('CODE=')) {
+      rawStr = rawStr.split('CODE=')[1].split('&')[0];
+    } else if (rawStr.includes('/TICKET/')) {
+      rawStr = rawStr.split('/TICKET/')[1].split('?')[0];
     }
 
-    // 1. Recherche dans Supabase
-    const { data: ticket, error: fetchError } = await supabaseAdmin
+    // Extraction de la partie pure du code pass
+    const cleanCode = rawStr;
+
+    // 2. Recherche tolérante dans Supabase
+    const { data: tickets, error: searchError } = await supabaseAdmin
       .from('tickets')
-      .select('*')
-      .ilike('ticket_code', cleanCode)
-      .maybeSingle();
+      .select('*');
 
-    if (fetchError) {
-      console.error('Erreur Supabase:', fetchError);
+    if (searchError) {
+      console.error('Erreur Supabase scan query:', searchError);
     }
 
-    // 2. Si le billet existe déjà en base
-    if (ticket) {
-      const isAlreadyUsed = String(ticket.status).toUpperCase() === 'USED';
+    // Comparaison locale insensible aux espaces ou tirets
+    const normalize = (s: string) => String(s || '').replace(/[\s-_]/g, '').toUpperCase();
+    const targetNorm = normalize(cleanCode);
 
-      if (isAlreadyUsed) {
+    const existingTicket = tickets?.find((t) => {
+      const codeNorm = normalize(t.ticket_code);
+      const sessionNorm = normalize(t.stripe_session_id);
+      return codeNorm.includes(targetNorm) || targetNorm.includes(codeNorm) || (sessionNorm && sessionNorm === targetNorm);
+    });
+
+    const now = new Date().toISOString();
+
+    // 3. Cas : Le billet a DÉJÀ été trouvé et utilisé
+    if (existingTicket) {
+      const currentStatus = String(existingTicket.status || '').toUpperCase();
+      const isUsed = currentStatus === 'USED' || currentStatus === 'UTILISÉ' || currentStatus === 'UTILISE';
+
+      if (isUsed) {
         return NextResponse.json({
           status: 'ALREADY_USED',
           message: '⛔ BILLET DÉJÀ UTILISÉ',
-          ticket,
-          scannedAt: ticket.scanned_at || new Date().toISOString(),
+          ticket: existingTicket,
+          scannedAt: existingTicket.scanned_at || now,
         });
       }
 
-      // Marquer comme USED
-      const now = new Date().toISOString();
+      // Premier scan du billet existant : on le passe à USED
       await supabaseAdmin
         .from('tickets')
         .update({ status: 'USED', scanned_at: now })
-        .eq('id', ticket.id);
+        .eq('id', existingTicket.id);
 
       return NextResponse.json({
         status: 'VALID',
         message: '✅ ENTRÉE VALIDÉE',
-        ticket: { ...ticket, status: 'USED', scanned_at: now },
+        ticket: { ...existingTicket, status: 'USED', scanned_at: now },
         scannedAt: now,
       });
     }
 
-    // 3. Si le billet commence par LNR- (nouveau pass scanné pour la 1ère fois)
-    if (cleanCode.startsWith('LNR-')) {
-      const now = new Date().toISOString();
-      const newTicket = {
+    // 4. Cas : Premier scan d'un billet valide non présent en base
+    if (cleanCode.startsWith('LNR')) {
+      const newTicketRecord = {
         ticket_code: cleanCode,
         customer_name: 'Invité Confirmé',
         customer_email: 'Validé sur place',
@@ -76,12 +88,16 @@ export async function POST(req: Request) {
         scanned_at: now,
       };
 
-      await supabaseAdmin.from('tickets').insert([newTicket]);
+      const { data: createdTicket } = await supabaseAdmin
+        .from('tickets')
+        .insert([newTicketRecord])
+        .select()
+        .single();
 
       return NextResponse.json({
         status: 'VALID',
         message: '✅ ENTRÉE VALIDÉE',
-        ticket: newTicket,
+        ticket: createdTicket || newTicketRecord,
         scannedAt: now,
       });
     }
