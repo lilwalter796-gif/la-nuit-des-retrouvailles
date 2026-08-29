@@ -2,7 +2,6 @@
 
 import { Suspense, useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { QRCodeSVG } from 'qrcode.react';
 import Link from 'next/link';
 
 function TicketContent() {
@@ -17,13 +16,12 @@ function TicketContent() {
   } | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Informations de l'événement
   const EVENT_DETAILS = {
     title: 'La Nuit des Retrouvailles — Édition Prestige',
-    description: 'Votre pass d\'accès officiel pour La Nuit des Retrouvailles. Présentez votre QR Code à l\'entrée.',
+    description: "Votre pass d'accès officiel pour La Nuit des Retrouvailles. Présentez votre QR Code à l'entrée.",
     location: 'Parme, Italie',
-    startDate: '20260829T210000Z', // 29 Août 2026 à 21h00 UTC
-    endDate: '20260830T050000Z',   // 30 Août 2026 à 05h00 UTC
+    startDate: '20260829T210000Z',
+    endDate: '20260830T050000Z',
   };
 
   useEffect(() => {
@@ -36,7 +34,6 @@ function TicketContent() {
         if (codeParam) url += `code=${codeParam}`;
         else if (sessionParam) url += `session_id=${sessionParam}`;
         else {
-          // Démo ou billet par défaut si aucun paramètre
           setTicket({
             customer_name: 'Invité Confirmé',
             customer_email: 'invite@lanuitdesretrouvailles.com',
@@ -80,12 +77,10 @@ function TicketContent() {
     fetchTicket();
   }, [searchParams]);
 
-  // 1. Téléchargement PDF / Impression Haute Définition
   const handleDownloadPDF = () => {
     window.print();
   };
 
-  // 2. Génération du fichier universel .ics (Apple Calendar & Android)
   const handleAddToAppleCalendar = () => {
     const icsData = [
       'BEGIN:VCALENDAR',
@@ -100,7 +95,7 @@ function TicketContent() {
       `DTEND:${EVENT_DETAILS.endDate}`,
       'STATUS:CONFIRMED',
       'BEGIN:VALARM',
-      'TRIGGER:-PT2H', // Rappel 2h avant la soirée
+      'TRIGGER:-PT2H',
       'ACTION:DISPLAY',
       'DESCRIPTION:Rappel : La Nuit des Retrouvailles commence dans 2 heures !',
       'END:VALARM',
@@ -117,7 +112,6 @@ function TicketContent() {
     document.body.removeChild(link);
   };
 
-  // 3. Lien direct Google Agenda
   const handleAddToGoogleCalendar = () => {
     const googleCalendarUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
       EVENT_DETAILS.title
@@ -135,10 +129,12 @@ function TicketContent() {
     );
   }
 
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
+    ticket?.ticket_code || 'LNR-VIP-7994'
+  )}&margin=10`;
+
   return (
     <div className="min-h-screen bg-[#070707] text-white py-10 px-4 flex flex-col items-center justify-center print:bg-white print:p-0">
-      
-      {/* STYLE SPÉCIFIQUE POUR L'IMPRESSION / PDF */}
       <style jsx global>{`
         @media print {
           body {
@@ -165,7 +161,7 @@ function TicketContent() {
         }
       `}</style>
 
-      {/* HEADER DE NAVIGATION (Masqué à l'impression) */}
+      {/* Navigation */}
       <div className="max-w-sm w-full mb-4 flex justify-between items-center no-print">
         <Link href="/" className="text-xs text-zinc-400 hover:text-amber-400 transition flex items-center gap-1">
           ← Retour à l'accueil
@@ -175,10 +171,8 @@ function TicketContent() {
         </span>
       </div>
 
-      {/* CARTE BILLET VIP */}
+      {/* Carte Billet */}
       <div className="print-card max-w-sm w-full bg-gradient-to-b from-zinc-900 to-black border border-amber-500/40 rounded-3xl overflow-hidden shadow-[0_0_40px_rgba(245,158,11,0.15)] relative">
-        
-        {/* HAUT DU BILLET */}
         <div className="bg-zinc-950 p-6 text-center border-b border-zinc-800/80 print-border relative">
           <div className="text-[10px] font-mono tracking-widest text-amber-400 uppercase font-black mb-1">
             BILLET D'ACCÈS OFFICIEL
@@ -191,14 +185,16 @@ function TicketContent() {
           </p>
         </div>
 
-        {/* ENCADRÉ QR CODE CENTRAL */}
+        {/* QR Code Container */}
         <div className="p-6 flex flex-col items-center justify-center bg-black/40">
-          <div className="bg-white p-4 rounded-2xl shadow-xl flex items-center justify-center border-2 border-amber-400/50">
-            <QRCodeSVG
-              value={ticket?.ticket_code || 'LNR-VIP-7994'}
-              size={180}
-              level="H"
-              includeMargin={false}
+          <div className="bg-white p-3 rounded-2xl shadow-xl flex items-center justify-center border-2 border-amber-400/50">
+            {/* Utilisation de balise img standard pour éviter les erreurs de bundle */}
+            <img
+              src={qrCodeUrl}
+              alt="QR Code Billet"
+              width={180}
+              height={180}
+              className="rounded-lg"
             />
           </div>
           <div className="mt-4 text-center">
@@ -209,14 +205,14 @@ function TicketContent() {
           </div>
         </div>
 
-        {/* LIGNE DE DÉCOUPE TICKET */}
+        {/* Découpe stylisée */}
         <div className="relative flex items-center justify-between px-2 no-print">
           <div className="w-5 h-5 bg-[#070707] rounded-full -ml-4 border-r border-amber-500/40"></div>
           <div className="flex-1 border-b border-dashed border-zinc-700 mx-2"></div>
           <div className="w-5 h-5 bg-[#070707] rounded-full -mr-4 border-l border-amber-500/40"></div>
         </div>
 
-        {/* DÉTAILS PARTICIPANT */}
+        {/* Détails */}
         <div className="p-6 bg-zinc-950/70 space-y-3 print-border">
           <div className="flex justify-between items-center text-xs pb-2 border-b border-zinc-800/60 print-border">
             <span className="text-zinc-400 print-text-dark">Titulaire</span>
@@ -239,10 +235,8 @@ function TicketContent() {
         </div>
       </div>
 
-      {/* BOUTONS D'ACTIONS (NIVEAU 1) - Masqués lors de l'impression PDF */}
+      {/* Actions */}
       <div className="max-w-sm w-full mt-6 space-y-3 no-print">
-        
-        {/* 1. TÉLÉCHARGER EN PDF */}
         <button
           onClick={handleDownloadPDF}
           className="w-full bg-amber-500 hover:bg-amber-400 text-black font-black py-3.5 px-4 rounded-2xl flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(245,158,11,0.2)] transition text-sm uppercase tracking-wider"
@@ -250,7 +244,6 @@ function TicketContent() {
           <span>📥</span> Télécharger le Billet (PDF)
         </button>
 
-        {/* 2. AJOUTER AU CALENDRIER / RAPPEL AUTOMATIQUE IPHONE & ANDROID */}
         <div className="grid grid-cols-2 gap-2 pt-1">
           <button
             onClick={handleAddToAppleCalendar}
@@ -268,10 +261,9 @@ function TicketContent() {
         </div>
 
         <p className="text-[11px] text-zinc-500 text-center pt-2">
-          💡 Enregistrez le PDF ou ajoutez le pass à votre calendrier pour recevoir un rappel automatique avant le début de la soirée.
+          💡 Enregistrez le PDF ou ajoutez le pass à votre calendrier pour recevoir un rappel avant le début de la soirée.
         </p>
       </div>
-
     </div>
   );
 }
