@@ -31,17 +31,9 @@ function TicketContent() {
     async function fetchTicket() {
       try {
         let url = '/api/tickets?';
-        if (codeParam) url += `code=${codeParam}`;
-        else if (sessionParam) url += `session_id=${sessionParam}`;
+        if (codeParam) url += `code=${encodeURIComponent(codeParam)}`;
+        else if (sessionParam) url += `session_id=${encodeURIComponent(sessionParam)}`;
         else {
-          setTicket({
-            customer_name: 'Invité Confirmé',
-            customer_email: 'invite@lanuitdesretrouvailles.com',
-            ticket_type: 'PASS OFFICIEL VIP',
-            ticket_code: 'LNR-VIP-7994',
-            amount_paid: 20,
-            status: 'VALID',
-          });
           setLoading(false);
           return;
         }
@@ -50,25 +42,9 @@ function TicketContent() {
         const data = await res.json();
         if (data.ticket) {
           setTicket(data.ticket);
-        } else {
-          setTicket({
-            customer_name: 'Invité Confirmé',
-            customer_email: 'invite@lanuitdesretrouvailles.com',
-            ticket_type: 'PASS OFFICIEL VIP',
-            ticket_code: codeParam || 'LNR-DFZ06-7994',
-            amount_paid: 20,
-            status: 'VALID',
-          });
         }
       } catch (err) {
-        setTicket({
-          customer_name: 'Invité Confirmé',
-          customer_email: 'invite@lanuitdesretrouvailles.com',
-          ticket_type: 'PASS OFFICIEL VIP',
-          ticket_code: codeParam || 'LNR-DFZ06-7994',
-          amount_paid: 20,
-          status: 'VALID',
-        });
+        console.error('Erreur chargement billet:', err);
       } finally {
         setLoading(false);
       }
@@ -129,8 +105,20 @@ function TicketContent() {
     );
   }
 
+  if (!ticket) {
+    return (
+      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-4 text-center">
+        <h2 className="text-xl font-bold text-amber-400 mb-2">Aucun billet trouvé</h2>
+        <p className="text-zinc-400 text-xs mb-6">Le lien du billet est invalide ou la commande est en cours de traitement.</p>
+        <Link href="/" className="bg-amber-500 text-black font-bold px-6 py-2.5 rounded-xl text-xs hover:bg-amber-400 transition">
+          Retour à l'accueil
+        </Link>
+      </div>
+    );
+  }
+
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
-    ticket?.ticket_code || 'LNR-VIP-7994'
+    ticket.ticket_code
   )}&margin=10`;
 
   return (
@@ -171,7 +159,7 @@ function TicketContent() {
         </span>
       </div>
 
-      {/* Carte Billet */}
+      {/* Carte Billet VIP */}
       <div className="print-card max-w-sm w-full bg-gradient-to-b from-zinc-900 to-black border border-amber-500/40 rounded-3xl overflow-hidden shadow-[0_0_40px_rgba(245,158,11,0.15)] relative">
         <div className="bg-zinc-950 p-6 text-center border-b border-zinc-800/80 print-border relative">
           <div className="text-[10px] font-mono tracking-widest text-amber-400 uppercase font-black mb-1">
@@ -188,7 +176,6 @@ function TicketContent() {
         {/* QR Code Container */}
         <div className="p-6 flex flex-col items-center justify-center bg-black/40">
           <div className="bg-white p-3 rounded-2xl shadow-xl flex items-center justify-center border-2 border-amber-400/50">
-            {/* Utilisation de balise img standard pour éviter les erreurs de bundle */}
             <img
               src={qrCodeUrl}
               alt="QR Code Billet"
@@ -200,12 +187,12 @@ function TicketContent() {
           <div className="mt-4 text-center">
             <span className="text-[11px] uppercase tracking-wider text-zinc-500 font-mono block">Code Unique</span>
             <span className="text-base font-mono font-black text-amber-400 print-text-dark tracking-widest">
-              {ticket?.ticket_code}
+              {ticket.ticket_code}
             </span>
           </div>
         </div>
 
-        {/* Découpe stylisée */}
+        {/* Ligne de découpe */}
         <div className="relative flex items-center justify-between px-2 no-print">
           <div className="w-5 h-5 bg-[#070707] rounded-full -ml-4 border-r border-amber-500/40"></div>
           <div className="flex-1 border-b border-dashed border-zinc-700 mx-2"></div>
@@ -216,11 +203,11 @@ function TicketContent() {
         <div className="p-6 bg-zinc-950/70 space-y-3 print-border">
           <div className="flex justify-between items-center text-xs pb-2 border-b border-zinc-800/60 print-border">
             <span className="text-zinc-400 print-text-dark">Titulaire</span>
-            <strong className="text-white print-text-dark font-medium">{ticket?.customer_name}</strong>
+            <strong className="text-white print-text-dark font-medium">{ticket.customer_name}</strong>
           </div>
           <div className="flex justify-between items-center text-xs pb-2 border-b border-zinc-800/60 print-border">
             <span className="text-zinc-400 print-text-dark">Formule</span>
-            <strong className="text-amber-400 font-bold">{ticket?.ticket_type}</strong>
+            <strong className="text-amber-400 font-bold">{ticket.ticket_type}</strong>
           </div>
           <div className="flex justify-between items-center text-xs pb-2 border-b border-zinc-800/60 print-border">
             <span className="text-zinc-400 print-text-dark">Lieu de l'événement</span>
@@ -229,7 +216,7 @@ function TicketContent() {
           <div className="flex justify-between items-center text-xs">
             <span className="text-zinc-400 print-text-dark">Statut du Pass</span>
             <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded text-[10px] font-black uppercase">
-              {ticket?.status === 'USED' ? 'Déjà Scanné' : 'Valide'}
+              {ticket.status === 'USED' ? 'Déjà Scanné' : 'Valide'}
             </span>
           </div>
         </div>

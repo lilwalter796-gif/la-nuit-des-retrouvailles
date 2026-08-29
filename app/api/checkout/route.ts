@@ -1,48 +1,47 @@
 import { NextResponse } from 'next/server';
-import { stripe } from '@/lib/stripe';
+import Stripe from 'stripe';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
+  apiVersion: '2024-06-20' as any,
+});
+
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
   try {
-    const { ticketType, quantity, customerName, customerEmail, phone } = await req.json();
+    const { ticketType, price, customerEmail, customerName } = await req.json();
 
-    const unitAmount = ticketType === 'VIP' ? 5000 : 2000; // 20€ ou 50€ en centimes
+    const origin = req.headers.get('origin') || 'https://la-nuit-des-retrouvailles.vercel.app';
 
-    // @ts-ignore
     const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
       line_items: [
         {
           price_data: {
             currency: 'eur',
             product_data: {
-              name: `La Nuit des Retrouvailles - ${ticketType || 'ENTRÉE SIMPLE + CONSO'}`,
-              description: 'Accès 1 personne • 17.10.2026 à Parma',
-              tax_code: 'txcd_10000000', // Code taxe standard service/événement
+              name: `La Nuit des Retrouvailles — ${ticketType || 'Pass Entrée'}`,
+              description: 'Pass d\'accès officiel avec QR Code',
             },
-            unit_amount: unitAmount,
+            unit_amount: Math.round((price || 20) * 100),
           },
-          quantity: quantity || 1,
+          quantity: 1,
         },
       ],
       mode: 'payment',
-      customer_email: customerEmail,
+      customer_email: customerEmail || undefined,
       metadata: {
-        ticket_type: ticketType || 'STANDARD',
-        quantity: String(quantity || 1),
-        customer_name: customerName,
-        phone: phone || '',
+        ticket_type: ticketType || 'PASS OFFICIEL VIP',
+        customer_name: customerName || 'Invité Confirmé',
       },
-      // Désactive l'obligation stricte des Managed Payments pour cette session
-      // @ts-ignore
-      managed_payments: {
-        enabled: false,
-      },
-      success_url: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://la-nuit-des-retrouvailles.vercel.app'}/ticket?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://la-nuit-des-retrouvailles.vercel.app'}`,
+      // IMPORTANT : Stripe remplace automatiquement {CHECKOUT_SESSION_ID} par le vrai ID unique de transaction
+      success_url: `${origin}/ticket?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/#billetterie`,
     });
 
     return NextResponse.json({ url: session.url });
   } catch (err: any) {
-    console.error('Erreur Stripe Checkout:', err);
+    console.error('Erreur Checkout Stripe:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
