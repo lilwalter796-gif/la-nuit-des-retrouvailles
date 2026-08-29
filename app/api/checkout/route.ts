@@ -9,40 +9,50 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
   try {
-    const { ticketType, price, customerEmail, customerName, quantity } = await req.json();
+    const body = await req.json();
+
+    // Récupération souple des champs du formulaire
+    const qty = body.quantity && Number(body.quantity) > 0 ? Number(body.quantity) : 1;
+    const email = (body.email || body.customerEmail || '').trim();
+    const name = (
+      body.customerName ||
+      `${body.firstName || ''} ${body.lastName || ''}`.trim() ||
+      'Participant Confirmé'
+    ).trim();
+    const phone = (body.phone || '').trim();
+    const ticketType = body.ticketType || 'ENTRÉE SIMPLE + CONSO';
+    const price = body.price || 20;
 
     const origin = req.headers.get('origin') || 'https://la-nuit-des-retrouvailles.vercel.app';
-    const qty = quantity && Number(quantity) > 0 ? Number(quantity) : 1;
 
-    const sessionParams: any = {
+    const session = await stripe.checkout.sessions.create({
       line_items: [
         {
           price_data: {
             currency: 'eur',
             product_data: {
-              name: `La Nuit des Retrouvailles — ${ticketType || 'Pass Entrée'}`,
-              description: "Pass d'accès officiel avec QR Code",
+              name: `La Nuit des Retrouvailles — ${ticketType}`,
+              description: 'Pass d\'accès officiel avec QR Code (Accès prioritaire + 1 Conso)',
             },
-            unit_amount: Math.round((price || 20) * 100),
+            unit_amount: Math.round(price * 100),
           },
           quantity: qty,
         },
       ],
       mode: 'payment',
-      customer_email: customerEmail || undefined,
+      customer_email: email || undefined,
       metadata: {
-        ticket_type: ticketType || 'PASS OFFICIEL VIP',
-        customer_name: customerName || 'Invité Confirmé',
+        customer_name: name,
+        customer_email: email,
+        customer_phone: phone,
+        ticket_type: ticketType,
       },
-      // Désactive les Managed Payments qui bloquent sur les codes fiscaux
       managed_payments: {
         enabled: false,
       },
       success_url: `${origin}/ticket?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/#billetterie`,
-    };
-
-    const session = await stripe.checkout.sessions.create(sessionParams);
+      cancel_url: `${origin}/#billets`,
+    });
 
     return NextResponse.json({ url: session.url });
   } catch (err: any) {
