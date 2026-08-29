@@ -94,7 +94,8 @@ export default function ScanPage() {
   const formatScanTime = (isoString?: string) => {
     if (!isoString) return new Date().toLocaleTimeString('fr-FR');
     try {
-      return new Date(isoString).toLocaleTimeString('fr-FR', {
+      const d = new Date(isoString);
+      return d.toLocaleTimeString('fr-FR', {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
@@ -144,43 +145,54 @@ export default function ScanPage() {
         </div>
 
         {/* CADRE CAMÉRA */}
-        <div className="relative rounded-3xl overflow-hidden border-2 border-dashed border-amber-500/50 bg-black min-h-[280px] flex items-center justify-center">
+        <div className="relative rounded-3xl overflow-hidden border-2 border-dashed border-amber-500/50 bg-black min-h-[260px] flex items-center justify-center">
           <div id="reader" className="w-full"></div>
           {loading && (
             <div className="absolute inset-0 bg-black/85 flex items-center justify-center text-amber-400 font-bold z-10">
-              Vérification...
+              Vérification du billet en cours...
             </div>
           )}
         </div>
 
-        {/* CARTE RÉSULTAT COMPLÈTE */}
+        {/* CARTE RÉSULTAT DU SCAN */}
         {scanResult && (
           <div
             className={`p-6 rounded-3xl border text-center transition-all ${
               scanResult.status === 'VALID'
-                ? 'bg-emerald-950 border-emerald-500 text-white shadow-[0_0_30px_rgba(16,185,129,0.35)]'
+                ? 'bg-emerald-950 border-emerald-500 text-white shadow-[0_0_40px_rgba(16,185,129,0.4)]'
                 : scanResult.status === 'ALREADY_USED'
-                ? 'bg-red-950 border-red-500 text-white shadow-[0_0_35px_rgba(239,68,68,0.5)]'
+                ? 'bg-red-950 border-red-500 text-white shadow-[0_0_50px_rgba(239,68,68,0.7)] animate-pulse'
                 : 'bg-zinc-900 border-zinc-700 text-zinc-300'
             }`}
           >
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider mb-3 bg-black/50 border border-white/10">
-              {scanResult.status === 'VALID' && '🟢 Entrée Autorisée'}
-              {scanResult.status === 'ALREADY_USED' && '🔴 Entrée Refusée (Déjà utilisé)'}
-              {scanResult.status === 'INVALID' && '⚠️ Code Non Reconnu'}
+            {/* BADGE ÉTAT */}
+            <div
+              className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider mb-3 border ${
+                scanResult.status === 'VALID'
+                  ? 'bg-emerald-500/30 text-emerald-200 border-emerald-400'
+                  : scanResult.status === 'ALREADY_USED'
+                  ? 'bg-red-600 text-white border-red-300'
+                  : 'bg-zinc-800 text-zinc-300 border-zinc-600'
+              }`}
+            >
+              {scanResult.status === 'VALID' && '🟢 ACCÈS AUTORISÉ'}
+              {scanResult.status === 'ALREADY_USED' && '🚨 ENTRÉE REFUSÉE — BILLET DÉJÀ PRÉSENTÉ'}
+              {scanResult.status === 'INVALID' && '⚠️ CODE REJETÉ'}
             </div>
 
             <h3 className="text-2xl font-black tracking-wide mb-1">{scanResult.message}</h3>
 
             <p className="text-xs text-zinc-300 mb-4 font-mono">
-              {scanResult.status === 'ALREADY_USED' ? 'Premier scan enregistré à :' : 'Validé à :'} {' '}
-              <span className="font-bold text-white bg-black/60 px-2 py-0.5 rounded">
+              {scanResult.status === 'ALREADY_USED'
+                ? '⚠️ Billet déjà validé précédemment à :'
+                : 'Heure de validation :'} {' '}
+              <span className="font-bold text-white bg-black/70 px-2.5 py-1 rounded-lg border border-white/20">
                 {formatScanTime(scanResult.scannedAt || scanResult.ticket?.scanned_at)}
               </span>
             </p>
 
             {scanResult.ticket && (
-              <div className="text-xs text-left bg-black/60 p-4 rounded-2xl space-y-2 border border-white/10 mb-4">
+              <div className="text-xs text-left bg-black/75 p-4 rounded-2xl space-y-2 border border-white/15 mb-4">
                 <div className="flex justify-between border-b border-zinc-800 pb-1.5">
                   <span className="text-zinc-400">Participant</span>
                   <strong className="text-white text-sm">
@@ -198,20 +210,20 @@ export default function ScanPage() {
                 <div className="flex justify-between border-b border-zinc-800 pb-1.5">
                   <span className="text-zinc-400">Code Pass</span>
                   <strong className="font-mono text-zinc-100 tracking-wider">
-                    {scanResult.ticket.ticket_code || manualCode || 'LNR-PASS'}
+                    {scanResult.ticket.ticket_code || manualCode}
                   </strong>
                 </div>
 
                 <div className="flex justify-between items-center pt-0.5">
-                  <span className="text-zinc-400">Statut de validation</span>
+                  <span className="text-zinc-400">Statut du billet</span>
                   <span
-                    className={`font-black uppercase px-2.5 py-0.5 rounded text-[11px] ${
+                    className={`font-black uppercase px-2.5 py-1 rounded text-[11px] ${
                       scanResult.status === 'VALID'
                         ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                        : 'bg-red-500/20 text-red-300 border border-red-500/40'
+                        : 'bg-red-600 text-white border border-red-400'
                     }`}
                   >
-                    {scanResult.status === 'ALREADY_USED' ? 'DÉJÀ ENTRÉ' : 'ENTRÉE VALIDÉE'}
+                    {scanResult.status === 'ALREADY_USED' ? '⛔ DÉJÀ UTILISÉ' : '✅ VALIDE (1er scan)'}
                   </span>
                 </div>
               </div>
@@ -219,7 +231,7 @@ export default function ScanPage() {
 
             <button
               onClick={handleNextScan}
-              className="w-full bg-white text-black font-bold py-3 rounded-xl text-sm hover:bg-zinc-200 transition"
+              className="w-full bg-white text-black font-bold py-3 rounded-xl text-sm hover:bg-zinc-200 transition shadow-lg"
             >
               Scanner le billet suivant
             </button>
@@ -234,7 +246,7 @@ export default function ScanPage() {
               type="text"
               value={manualCode}
               onChange={(e) => setManualCode(e.target.value.toUpperCase())}
-              placeholder="LNR-XXXXX-XXXX"
+              placeholder="LNR-DFZ06-7994"
               className="flex-1 bg-black border border-zinc-700 px-3 py-2 rounded-xl text-sm font-mono uppercase text-white outline-none focus:border-amber-500"
             />
             <button

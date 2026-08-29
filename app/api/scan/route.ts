@@ -17,14 +17,16 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { code, pin } = body;
 
+    // 1. Vérification PIN Organisateur
     if (pin !== '8520') {
-      return NextResponse.json({ status: 'INVALID', message: 'Code PIN incorrect' });
+      return NextResponse.json({ status: 'INVALID', message: 'Code PIN incorrect' }, { status: 401 });
     }
 
     if (!code) {
-      return NextResponse.json({ status: 'INVALID', message: 'Aucun code détecté' });
+      return NextResponse.json({ status: 'INVALID', message: 'Aucun code fourni' }, { status: 400 });
     }
 
+    // 2. Nettoyage et normalisation du code
     let rawStr = String(code).trim().replace(/\s+/g, '').toUpperCase();
     if (rawStr.includes('CODE=')) {
       rawStr = rawStr.split('CODE=')[1].split('&')[0];
@@ -33,14 +35,15 @@ export async function POST(req: Request) {
     }
 
     const cleanCode = rawStr;
+    const now = new Date().toISOString();
 
-    // Récupération des billets existants
+    // 3. Recherche dans Supabase de tout billet correspondant
     const { data: tickets, error: searchError } = await supabaseAdmin
       .from('tickets')
       .select('*');
 
     if (searchError) {
-      console.error('Erreur Supabase scan query:', searchError);
+      console.error('Erreur Supabase query:', searchError);
     }
 
     const normalize = (s: string) => String(s || '').replace(/[\s-_]/g, '').toUpperCase();
@@ -55,83 +58,92 @@ export async function POST(req: Request) {
       );
     });
 
-    const now = new Date().toISOString();
-
-    // Cas 1 : Le billet existe en base
+    // 4. Si le billet existe déjà en base
     if (existingTicket) {
       const currentStatus = String(existingTicket.status || '').toUpperCase();
-      const isUsed = currentStatus === 'USED' || currentStatus === 'UTILISÉ' || currentStatus === 'UTILISE';
+      const isAlreadyUsed =
+        currentStatus === 'USED' ||
+        currentStatus === 'UTILISÉ' ||
+        currentStatus === 'UTILISE' ||
+        Boolean(existingTicket.scanned_at);
 
-      const formattedTicket = {
+      const ticketDetails = {
         id: existingTicket.id,
         ticket_code: existingTicket.ticket_code || cleanCode,
         customer_name: existingTicket.customer_name || existingTicket.name || 'Invité Officiel',
-        customer_email: existingTicket.customer_email || existingTicket.email || 'Email vérifié',
+        customer_email: existingTicket.customer_email || existingTicket.email || 'Vérifié',
         ticket_type: formatTicketType(existingTicket.ticket_type || existingTicket.ticketType),
         amount_paid: existingTicket.amount_paid || 20,
-        status: isUsed ? 'USED' : 'USED',
+        status: 'USED',
         scanned_at: existingTicket.scanned_at || now,
       };
 
-      if (isUsed) {
+      // CAS A : LE BILLET A DÉJÀ ÉTÉ UTILISÉ (Peu importe l'heure) -> ALERTE ROUGE
+      if (isAlreadyUsed) {
         return NextResponse.json({
           status: 'ALREADY_USED',
-          message: '⛔ BILLET DÉJÀ UTILISÉ',
-          ticket: formattedTicket,
+          message: '⛔ BILLET DÉJÀ UTILISÉ !',
+          ticket: ticketDetails,
           scannedAt: existingTicket.scanned_at || now,
         });
       }
 
+      // CAS B : PREMIER SCAN DU BILLET -> VALIDATION ET MARQUAGE IMMÉDIAT EN "USED"
       await supabaseAdmin
         .from('tickets')
-        .update({ status: 'USED', scanned_at: now })
+        .update({
+          status: 'USED',
+          scanned_at: now,
+        })
         .eq('id', existingTicket.id);
 
       return NextResponse.json({
         status: 'VALID',
         message: '✅ ENTRÉE VALIDÉE',
-        ticket: formattedTicket,
+        ticket: { ...ticketDetails, scanned_at: now },
         scannedAt: now,
       });
     }
 
-    // Cas 2 : Pass valide LNR- non encore indexé
+    // 5. Cas où le pass est un code valide LNR-... scanné pour la toute 1ère fois
     if (cleanCode.startsWith('LNR')) {
       const newTicketRecord = {
         ticket_code: cleanCode,
         customer_name: 'Invité Confirmé',
         customer_email: 'Validé sur place',
-        ticket_type: 'ENTRÉE SIMPLE + CONSO',
+        ticket_type: 'PASS OFFICIEL',
         amount_paid: 20,
         status: 'USED',
         scanned_at: now,
       };
 
-      const { data: createdTicket } = await supabaseAdmin
+      const { data: insertedTicket } = await supabaseAdmin
         .from('tickets')
         .insert([newTicketRecord])
         .select()
         .single();
 
-      const finalTicket = createdTicket || newTicketRecord;
+      const saved = insertedTicket || newTicketRecord;
 
       return NextResponse.json({
         status: 'VALID',
         message: '✅ ENTRÉE VALIDÉE',
         ticket: {
-          ...finalTicket,
-          ticket_type: formatTicketType(finalTicket.ticket_type),
+          ...saved,
+          ticket_type: formatTicketType(saved.ticket_type),
         },
         scannedAt: now,
       });
     }
 
+    // 6. Si aucun billet ne correspond
     return NextResponse.json({
       status: 'INVALID',
-      message: '❌ Billet non reconnu',
+      message: '❌ BILLET NON RECONNU',
     });
+
   } catch (err: any) {
-    console.error('Erreur scan:', err);
-    return NextResponse.json({ status: 'INVALID', message: 'Erreur serveur' });
+    console.error('Erreur API Scan:', err);
+    return NextResponse.json({ status: 'INVALID', message: 'Erreur interne du serveur' }, { status: 500 });
   }
 }
