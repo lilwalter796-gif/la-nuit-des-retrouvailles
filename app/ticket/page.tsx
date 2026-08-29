@@ -16,12 +16,14 @@ function TicketContent() {
   } | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Date officielle de l'événement
   const EVENT_DETAILS = {
     title: 'La Nuit des Retrouvailles — Édition Prestige',
     description: "Votre pass d'accès officiel pour La Nuit des Retrouvailles. Présentez votre QR Code à l'entrée.",
     location: 'Parme, Italie',
-    startDate: '20260829T210000Z',
-    endDate: '20260830T050000Z',
+    dateDisplay: 'Samedi 17 Octobre 2026 • 21h00',
+    startDate: '20261017T210000Z',
+    endDate: '20261018T050000Z',
   };
 
   useEffect(() => {
@@ -31,16 +33,18 @@ function TicketContent() {
     async function fetchTicket() {
       try {
         let url = '/api/tickets?';
-        if (codeParam) url += `code=${encodeURIComponent(codeParam)}`;
-        else if (sessionParam) url += `session_id=${encodeURIComponent(sessionParam)}`;
-        else {
+        if (codeParam) {
+          url += `code=${encodeURIComponent(codeParam.trim())}`;
+        } else if (sessionParam) {
+          url += `session_id=${encodeURIComponent(sessionParam.trim())}`;
+        } else {
           setLoading(false);
           return;
         }
 
         const res = await fetch(url);
         const data = await res.json();
-        if (data.ticket) {
+        if (data && data.ticket) {
           setTicket(data.ticket);
         }
       } catch (err) {
@@ -65,7 +69,7 @@ function TicketContent() {
       'CALSCALE:GREGORIAN',
       'BEGIN:VEVENT',
       `SUMMARY:${EVENT_DETAILS.title}`,
-      `DESCRIPTION:${EVENT_DETAILS.description} Code billet: ${ticket?.ticket_code || ''}`,
+      `DESCRIPTION:${EVENT_DETAILS.description} Code pass: ${ticket?.ticket_code || ''}`,
       `LOCATION:${EVENT_DETAILS.location}`,
       `DTSTART:${EVENT_DETAILS.startDate}`,
       `DTEND:${EVENT_DETAILS.endDate}`,
@@ -92,7 +96,7 @@ function TicketContent() {
     const googleCalendarUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
       EVENT_DETAILS.title
     )}&dates=${EVENT_DETAILS.startDate}/${EVENT_DETAILS.endDate}&details=${encodeURIComponent(
-      `${EVENT_DETAILS.description}\nCode Billet : ${ticket?.ticket_code || ''}`
+      `${EVENT_DETAILS.description}\nCode Pass : ${ticket?.ticket_code || ''}`
     )}&location=${encodeURIComponent(EVENT_DETAILS.location)}`;
     window.open(googleCalendarUrl, '_blank');
   };
@@ -109,7 +113,7 @@ function TicketContent() {
     return (
       <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-4 text-center">
         <h2 className="text-xl font-bold text-amber-400 mb-2">Aucun billet trouvé</h2>
-        <p className="text-zinc-400 text-xs mb-6">Le lien du billet est invalide ou la commande est en cours de traitement.</p>
+        <p className="text-zinc-400 text-xs mb-6">Ce billet n'existe pas ou le lien est expiré.</p>
         <Link href="/" className="bg-amber-500 text-black font-bold px-6 py-2.5 rounded-xl text-xs hover:bg-amber-400 transition">
           Retour à l'accueil
         </Link>
@@ -159,7 +163,7 @@ function TicketContent() {
         </span>
       </div>
 
-      {/* Carte Billet VIP */}
+      {/* Carte Billet */}
       <div className="print-card max-w-sm w-full bg-gradient-to-b from-zinc-900 to-black border border-amber-500/40 rounded-3xl overflow-hidden shadow-[0_0_40px_rgba(245,158,11,0.15)] relative">
         <div className="bg-zinc-950 p-6 text-center border-b border-zinc-800/80 print-border relative">
           <div className="text-[10px] font-mono tracking-widest text-amber-400 uppercase font-black mb-1">
@@ -169,7 +173,7 @@ function TicketContent() {
             La Nuit des Retrouvailles
           </h1>
           <p className="text-xs text-zinc-400 mt-1 font-mono">
-            Samedi 29 Août 2026 • 21h00
+            {EVENT_DETAILS.dateDisplay}
           </p>
         </div>
 
@@ -192,14 +196,14 @@ function TicketContent() {
           </div>
         </div>
 
-        {/* Ligne de découpe */}
+        {/* Découpe */}
         <div className="relative flex items-center justify-between px-2 no-print">
           <div className="w-5 h-5 bg-[#070707] rounded-full -ml-4 border-r border-amber-500/40"></div>
           <div className="flex-1 border-b border-dashed border-zinc-700 mx-2"></div>
           <div className="w-5 h-5 bg-[#070707] rounded-full -mr-4 border-l border-amber-500/40"></div>
         </div>
 
-        {/* Détails */}
+        {/* Détails du Participant */}
         <div className="p-6 bg-zinc-950/70 space-y-3 print-border">
           <div className="flex justify-between items-center text-xs pb-2 border-b border-zinc-800/60 print-border">
             <span className="text-zinc-400 print-text-dark">Titulaire</span>
@@ -222,7 +226,7 @@ function TicketContent() {
         </div>
       </div>
 
-      {/* Actions */}
+      {/* Boutons d'Action */}
       <div className="max-w-sm w-full mt-6 space-y-3 no-print">
         <button
           onClick={handleDownloadPDF}
@@ -248,7 +252,7 @@ function TicketContent() {
         </div>
 
         <p className="text-[11px] text-zinc-500 text-center pt-2">
-          💡 Enregistrez le PDF ou ajoutez le pass à votre calendrier pour recevoir un rappel avant le début de la soirée.
+          💡 Enregistrez le PDF ou ajoutez le pass à votre calendrier pour recevoir un rappel automatique avant le début de la soirée.
         </p>
       </div>
     </div>
