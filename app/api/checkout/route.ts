@@ -14,7 +14,7 @@ export async function POST(req: Request) {
     const origin = req.headers.get('origin') || 'https://la-nuit-des-retrouvailles.vercel.app';
     const qty = quantity && Number(quantity) > 0 ? Number(quantity) : 1;
 
-    const session = await stripe.checkout.sessions.create({
+    const sessionParams: any = {
       line_items: [
         {
           price_data: {
@@ -22,7 +22,6 @@ export async function POST(req: Request) {
             product_data: {
               name: `La Nuit des Retrouvailles — ${ticketType || 'Pass Entrée'}`,
               description: "Pass d'accès officiel avec QR Code",
-              tax_code: 'txcd_20030000', // Code fiscal officiel Stripe pour les billets d'accès / événements
             },
             unit_amount: Math.round((price || 20) * 100),
           },
@@ -35,9 +34,15 @@ export async function POST(req: Request) {
         ticket_type: ticketType || 'PASS OFFICIEL VIP',
         customer_name: customerName || 'Invité Confirmé',
       },
+      // Désactive les Managed Payments qui bloquent sur les codes fiscaux
+      managed_payments: {
+        enabled: false,
+      },
       success_url: `${origin}/ticket?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/#billetterie`,
-    });
+    };
+
+    const session = await stripe.checkout.sessions.create(sessionParams);
 
     return NextResponse.json({ url: session.url });
   } catch (err: any) {
