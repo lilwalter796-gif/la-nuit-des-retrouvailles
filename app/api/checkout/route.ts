@@ -9,23 +9,23 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
   try {
-    const { ticketType, price, customerEmail, customerName } = await req.json();
+    const { ticketType, price, customerEmail, customerName, quantity } = await req.json();
 
     const origin = req.headers.get('origin') || 'https://la-nuit-des-retrouvailles.vercel.app';
+    const qty = quantity && Number(quantity) > 0 ? Number(quantity) : 1;
 
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
       line_items: [
         {
           price_data: {
             currency: 'eur',
             product_data: {
               name: `La Nuit des Retrouvailles — ${ticketType || 'Pass Entrée'}`,
-              description: 'Pass d\'accès officiel avec QR Code',
+              description: "Pass d'accès officiel avec QR Code",
             },
             unit_amount: Math.round((price || 20) * 100),
           },
-          quantity: 1,
+          quantity: qty,
         },
       ],
       mode: 'payment',
@@ -34,7 +34,6 @@ export async function POST(req: Request) {
         ticket_type: ticketType || 'PASS OFFICIEL VIP',
         customer_name: customerName || 'Invité Confirmé',
       },
-      // IMPORTANT : Stripe remplace automatiquement {CHECKOUT_SESSION_ID} par le vrai ID unique de transaction
       success_url: `${origin}/ticket?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/#billetterie`,
     });
