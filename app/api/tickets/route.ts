@@ -9,7 +9,6 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
 
 const resend = new Resend(process.env.RESEND_API_KEY || '');
 
-// Initialisation robuste de Supabase avec fallback sur la clé publique si la clé admin n'est pas définie
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
@@ -19,6 +18,7 @@ const supabaseKey =
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0; // Force la non-mise en cache des requêtes
 
 function generateRandomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -45,7 +45,8 @@ export async function GET(req: Request) {
           const { data: ticket } = await supabase
             .from('tickets')
             .select('*')
-            .ilike('ticket_code', code)
+            // Recherche large pour inclure les anciennes et nouvelles colonnes
+            .or(`ticket_code.ilike.${code},ticket_number.ilike.${code}`)
             .maybeSingle();
 
           if (ticket) {
@@ -56,12 +57,12 @@ export async function GET(req: Request) {
         }
       }
 
-      // Si Supabase n'a pas encore propagé ou en cas de lecture directe
+      // Fallback
       return NextResponse.json({
         ticket: {
-          ticket_code: code,
-          customer_name: 'Titulaire du Pass',
-          customer_email: '',
+          ticket_number: code,
+          holder_name: 'Titulaire du Pass',
+          holder_email: '',
           ticket_type: 'ENTRÉE SIMPLE + CONSO',
           amount_paid: 20,
           status: 'VALID',
@@ -111,18 +112,34 @@ export async function GET(req: Request) {
         const ticketCode = generateRandomCode();
         const now = new Date().toISOString();
 
+        // 🔴 CORRECTION : Format strict correspondant à la base de données
         const ticketData = {
-          ticket_code: ticketCode,
-          customer_name: customerName,
-          customer_email: customerEmail,
+          ticket_number: ticketCode,      // Nouvelle colonne
+          qr_token: ticketCode,           // Colonne obligatoire (Not Null)
+          holder_name: customerName,      // Anciennement customer_name
+          holder_email: customerEmail,    // Anciennement customer_email
           ticket_type: ticketType,
           amount_paid: amountPaid,
           stripe_session_id: cleanSessionId,
           status: 'VALID',
+          is_scanned: false,              // Initialisation par défaut
           created_at: now,
         };
 
-        // 🟢 ÉTAPE 1 : ENVOI IMMÉDIAT DE L'EMAIL RESEND (Prioritaire)
+        // 🟡 ÉTAPE 1 : INSERTION DANS SUPABASE (On le fait AVANT l'email pour être sûr)
+        if (supabase) {
+          try {
+            const { error: dbErr } = await supabase.from('tickets').insert([ticketData]);
+            if (dbErr) {
+              console.error('Erreur critique insertion Supabase:', dbErr.message);
+              // On peut choisir d'avertir ici, mais pour l'expérience utilisateur, on continue
+            }
+          } catch (dbException) {
+            console.error('Exception Supabase insert:', dbException);
+          }
+        }
+
+        // 🟢 ÉTAPE 2 : ENVOI DE L'EMAIL RESEND
         if (customerEmail) {
           const origin = 'https://la-nuit-des-retrouvailles.vercel.app';
           const ticketUrl = `${origin}/ticket?code=${ticketCode}`;
@@ -174,15 +191,6 @@ export async function GET(req: Request) {
             console.log('✅ Email envoyé avec succès:', emailResult);
           } catch (emailErr) {
             console.error('❌ Erreur Resend send:', emailErr);
-          }
-        }
-
-        // 🟡 ÉTAPE 2 : INSERTION DANS SUPABASE (Sans bloquer le retour client)
-        if (supabase) {
-          try {
-            await supabase.from('tickets').insert([ticketData]);
-          } catch (dbErr) {
-            console.error('Erreur Supabase insert (non-bloquante):', dbErr);
           }
         }
 
