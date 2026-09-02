@@ -74,9 +74,10 @@ export async function POST(req: Request) {
     }
     const ticketCode = `VIP-${middle}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    // 2. Création de l'objet SANS la colonne stripe_session_id
+    // 2. Création de l'objet avec la colonne qr_token obligatoire ajoutée
     const newTicket = {
       ticket_number: ticketCode,
+      qr_token: ticketCode,          // <--- AJOUT DE LA COLONNE MANQUANTE ICI
       holder_name: holder_name,
       holder_email: holder_email,
       ticket_type: ticket_type || 'VIP_INVITE',
