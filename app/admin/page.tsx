@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Users, 
   QrCode, 
@@ -23,6 +23,7 @@ export default function AdminDashboard() {
   const [pin, setPin] = useState('');
   const [unlocked, setUnlocked] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false); // Pour le refresh silencieux
   const [stats, setStats] = useState<any>({ totalSold: 0, scannedCount: 0, scannedRate: 0, totalRevenue: '0.00' });
   const [tickets, setTickets] = useState<any[]>([]);
   const [search, setSearch] = useState('');
@@ -37,8 +38,11 @@ export default function AdminDashboard() {
   const [selectedTicket, setSelectedTicket] = useState<any>(null);
   const [modalQrUrl, setModalQrUrl] = useState<string>('');
 
-  const fetchData = async (secretPin: string) => {
-    setLoading(true);
+  // Fonction de récupération modifiée pour accepter un mode "silencieux" (sans bloquer l'UI)
+  const fetchData = async (secretPin: string, silent = false) => {
+    if (!silent) setLoading(true);
+    if (silent) setIsRefreshing(true);
+    
     try {
       const res = await fetch(`/api/admin?pin=${secretPin}`);
       const data = await res.json();
@@ -47,18 +51,32 @@ export default function AdminDashboard() {
         setTickets(data.tickets || []);
         setUnlocked(true);
       } else {
-        alert(data.error || 'Code PIN incorrect');
+        if (!silent) alert(data.error || 'Code PIN incorrect');
       }
     } catch (e) {
-      alert('Erreur de connexion au serveur');
+      if (!silent) alert('Erreur de connexion au serveur');
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   };
 
+  // 🔴 NOUVEAU : Auto-refresh toutes les 5 secondes quand le dashboard est déverrouillé
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (unlocked && pin) {
+      interval = setInterval(() => {
+        fetchData(pin, true); // Appelle la base de données en mode "silencieux"
+      }, 5000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [unlocked, pin]);
+
   const openTicketModal = async (ticket: any) => {
     setSelectedTicket(ticket);
-    const codeToEncode = ticket.qr_token || ticket.ticket_number;
+    const codeToEncode = ticket.qr_token || ticket.ticket_number || ticket.ticket_code;
     try {
       const qrData = await QRCode.toDataURL(codeToEncode, {
         width: 320,
@@ -93,7 +111,6 @@ export default function AdminDashboard() {
         setVipName('');
         setVipEmail('');
         await fetchData('8520');
-        // Ouvre directement le pass du billet créé
         if (data.ticket) {
           openTicketModal(data.ticket);
         }
@@ -110,7 +127,8 @@ export default function AdminDashboard() {
   const filteredTickets = tickets.filter((t) => 
     t.holder_name?.toLowerCase().includes(search.toLowerCase()) ||
     t.holder_email?.toLowerCase().includes(search.toLowerCase()) ||
-    t.ticket_number?.toLowerCase().includes(search.toLowerCase())
+    t.ticket_number?.toLowerCase().includes(search.toLowerCase()) ||
+    t.ticket_code?.toLowerCase().includes(search.toLowerCase())
   );
 
   if (!unlocked) {
@@ -151,17 +169,17 @@ export default function AdminDashboard() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-6 border-b border-neutral-800">
         <div>
           <span className="text-xs uppercase font-bold text-amber-400 tracking-widest flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Mode Live
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Mode Live {isRefreshing && <span className="text-neutral-500 ml-2 animate-pulse text-[10px]">(Syncing...)</span>}
           </span>
           <h1 className="text-2xl font-black uppercase text-white tracking-tight">Tableau de Bord — Événement</h1>
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => fetchData('8520')}
+            onClick={() => fetchData('8520', false)}
             disabled={loading}
             className="bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 transition"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Actualiser
+            <RefreshCw className={`w-3.5 h-3.5 ${loading || isRefreshing ? 'animate-spin' : ''}`} /> Actualiser
           </button>
           <button
             onClick={() => setUnlocked(false)}
@@ -174,7 +192,7 @@ export default function AdminDashboard() {
 
       {/* STATS CARDS */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 my-6">
-        <div className="bg-neutral-950 border border-neutral-800 p-5 rounded-2xl">
+        <div className="bg-neutral-950 border border-neutral-800 p-5 rounded-2xl transition-all">
           <div className="flex justify-between items-center text-neutral-400 mb-2">
             <span className="text-xs font-bold uppercase">Total Inscrits</span>
             <Users className="w-4 h-4 text-amber-400" />
@@ -182,7 +200,7 @@ export default function AdminDashboard() {
           <div className="text-2xl sm:text-3xl font-black text-white">{stats.totalSold}</div>
         </div>
 
-        <div className="bg-neutral-950 border border-neutral-800 p-5 rounded-2xl">
+        <div className="bg-neutral-950 border border-neutral-800 p-5 rounded-2xl transition-all">
           <div className="flex justify-between items-center text-neutral-400 mb-2">
             <span className="text-xs font-bold uppercase">Entrées Validées</span>
             <QrCode className="w-4 h-4 text-emerald-400" />
@@ -192,7 +210,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        <div className="bg-neutral-950 border border-neutral-800 p-5 rounded-2xl">
+        <div className="bg-neutral-950 border border-neutral-800 p-5 rounded-2xl transition-all">
           <div className="flex justify-between items-center text-neutral-400 mb-2">
             <span className="text-xs font-bold uppercase">En Attente</span>
             <Clock className="w-4 h-4 text-blue-400" />
@@ -200,7 +218,7 @@ export default function AdminDashboard() {
           <div className="text-2xl sm:text-3xl font-black text-white">{stats.totalSold - stats.scannedCount}</div>
         </div>
 
-        <div className="bg-neutral-950 border border-neutral-800 p-5 rounded-2xl">
+        <div className="bg-neutral-950 border border-neutral-800 p-5 rounded-2xl transition-all">
           <div className="flex justify-between items-center text-neutral-400 mb-2">
             <span className="text-xs font-bold uppercase">Recettes Stripe</span>
             <DollarSign className="w-4 h-4 text-amber-400" />
@@ -291,13 +309,13 @@ export default function AdminDashboard() {
               </thead>
               <tbody className="divide-y divide-neutral-900">
                 {filteredTickets.map((ticket) => (
-                  <tr key={ticket.id} className="hover:bg-neutral-900/40">
+                  <tr key={ticket.id || ticket.ticket_code} className="hover:bg-neutral-900/40">
                     <td className="py-3 pr-2">
-                      <div className="font-bold text-white uppercase">{ticket.holder_name}</div>
-                      <div className="text-[10px] text-neutral-500">{ticket.holder_email}</div>
+                      <div className="font-bold text-white uppercase">{ticket.holder_name || ticket.customer_name}</div>
+                      <div className="text-[10px] text-neutral-500">{ticket.holder_email || ticket.customer_email}</div>
                     </td>
                     <td className="py-3 font-mono text-[11px] text-neutral-300">
-                      {ticket.ticket_number}
+                      {ticket.ticket_number || ticket.ticket_code}
                     </td>
                     <td className="py-3">
                       <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border border-neutral-700 bg-neutral-900 text-neutral-300 uppercase">
@@ -305,7 +323,7 @@ export default function AdminDashboard() {
                       </span>
                     </td>
                     <td className="py-3">
-                      {ticket.is_scanned ? (
+                      {ticket.is_scanned || ticket.status === 'SCANNED' ? (
                         <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
                           <CheckCircle2 className="w-3 h-3" /> Scanné
                         </span>
@@ -321,7 +339,7 @@ export default function AdminDashboard() {
                         onClick={() => openTicketModal(ticket)}
                         className="bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-black px-3 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider inline-flex items-center gap-1.5 transition active:scale-95 shadow-md shadow-amber-500/10"
                       >
-                        <Eye className="w-3.5 h-3.5" /> Voir Pass & QR
+                        <Eye className="w-3.5 h-3.5" /> Voir
                       </button>
                     </td>
                   </tr>
@@ -357,16 +375,16 @@ export default function AdminDashboard() {
             <div className="py-3 border-b border-neutral-800/80 text-xs space-y-1.5">
               <div className="flex justify-between">
                 <span className="text-neutral-400">Participant :</span>
-                <span className="font-bold text-white uppercase">{selectedTicket.holder_name}</span>
+                <span className="font-bold text-white uppercase">{selectedTicket.holder_name || selectedTicket.customer_name}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-neutral-400">Numéro Billet :</span>
-                <span className="font-mono text-amber-400 font-bold">{selectedTicket.ticket_number}</span>
+                <span className="font-mono text-amber-400 font-bold">{selectedTicket.ticket_number || selectedTicket.ticket_code}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-neutral-400">Statut Entrée :</span>
-                <span className={`font-bold flex items-center gap-1 ${selectedTicket.is_scanned ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  {selectedTicket.is_scanned ? 'Déjà Scanné' : 'Valide / Prêt'}
+                <span className={`font-bold flex items-center gap-1 ${(selectedTicket.is_scanned || selectedTicket.status === 'SCANNED') ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {(selectedTicket.is_scanned || selectedTicket.status === 'SCANNED') ? 'Déjà Scanné' : 'Valide / Prêt'}
                 </span>
               </div>
             </div>
