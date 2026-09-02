@@ -3,7 +3,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 export const dynamic = 'force-dynamic';
 
-// Cache mémoire serveur haute performance (persistance immédiate pendant toute la soirée)
+// Cache mémoire serveur haute performance (persistance immédiate)
 const globalUsedTickets = new Map<string, { scannedAt: string; customerName: string; ticketType: string }>();
 
 function normalizeCode(str: string): string {
@@ -27,7 +27,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ status: 'INVALID', message: 'Aucun code fourni' }, { status: 400 });
     }
 
-    // 1. Extraction et nettoyage strict du code
     let inputStr = String(code).trim();
     if (inputStr.includes('code=')) {
       inputStr = inputStr.split('code=')[1].split('&')[0];
@@ -38,7 +37,7 @@ export async function POST(req: Request) {
     const cleanCode = normalizeCode(inputStr);
     const now = new Date().toISOString();
 
-    // 2. CONTRÔLE 1 : Vérification immédiate dans le cache mémoire serveur
+    // 1. CONTRÔLE MÉMOIRE
     if (globalUsedTickets.has(cleanCode)) {
       const cached = globalUsedTickets.get(cleanCode)!;
       return NextResponse.json({
@@ -55,8 +54,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 3. CONTRÔLE 2 : Vérification dans Supabase
-    // Recherche de la correspondance exacte dans "ticket_number" ou "ticket_code"
+    // 2. CONTRÔLE SUPABASE
     const { data: existingTicket, error: fetchErr } = await supabaseAdmin
       .from('tickets')
       .select('*')
@@ -68,7 +66,6 @@ export async function POST(req: Request) {
     }
 
     if (existingTicket) {
-      // Tolérance des statuts : on accepte USED, SCANNED ou is_scanned = true
       const statusUpper = String(existingTicket.status || '').toUpperCase();
       const alreadyScanned = statusUpper === 'USED' || statusUpper === 'SCANNED' || existingTicket.is_scanned === true || Boolean(existingTicket.scanned_at);
 
@@ -93,11 +90,18 @@ export async function POST(req: Request) {
         });
       }
 
-      // Marquer le billet comme validé dans Supabase
-      await supabaseAdmin
+      // 🔴 CORRECTION ICI : Mise à jour en ciblant expressément le numéro du billet
+      const matchCol = existingTicket.ticket_number ? 'ticket_number' : 'ticket_code';
+      const matchVal = existingTicket.ticket_number || existingTicket.ticket_code;
+
+      const { error: updateErr } = await supabaseAdmin
         .from('tickets')
         .update({ status: 'USED', is_scanned: true, scanned_at: now })
-        .eq('id', existingTicket.id);
+        .eq(matchCol, matchVal);
+
+      if (updateErr) {
+        console.error('Erreur critique validation Supabase:', updateErr);
+      }
 
       globalUsedTickets.set(cleanCode, {
         scannedAt: now,
@@ -118,7 +122,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 4. CONTRÔLE 3 : Accepte LNR et VIP si non trouvés (Sécurité d'urgence)
+    // 3. FALLBACK D'URGENCE LNR & VIP
     if (cleanCode.startsWith('LNR') || cleanCode.startsWith('VIP')) {
       const newTicket = {
         ticket_number: cleanCode,
