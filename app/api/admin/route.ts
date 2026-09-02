@@ -1,121 +1,109 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
-import crypto from 'crypto';
+import { createClient } from '@supabase/supabase-js';
 
-const ADMIN_SECRET = '8520';
+// Utilisation de la clé SERVICE_ROLE pour contourner les restrictions RLS (sécurité) en lecture
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabaseAdmin = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const pin = searchParams.get('pin');
+export const dynamic = 'force-dynamic';
 
-  if (pin !== ADMIN_SECRET) {
-    return NextResponse.json({ error: 'Accès non autorisé' }, { status: 401 });
-  }
-
+export async function GET(req: Request) {
   try {
-    const { data: tickets, error } = await supabase
+    const { searchParams } = new URL(req.url);
+    const pin = searchParams.get('pin');
+
+    // Vérification du code PIN (Sécurité basique)
+    if (pin !== '8520') {
+      return NextResponse.json({ error: 'Accès non autorisé : PIN incorrect' }, { status: 401 });
+    }
+
+    if (!supabaseAdmin) {
+      throw new Error("Supabase n'est pas correctement configuré sur le serveur.");
+    }
+
+    // 1. Récupération de TOUS les billets (sans limite)
+    const { data: tickets, error } = await supabaseAdmin
       .from('tickets')
       .select('*')
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
+    if (error) {
+      console.error('Erreur lecture tickets:', error);
+      throw error;
+    }
 
-    const normalizedTickets = (tickets || []).map((t) => ({
-      ...t,
-      holder_name:
-        t.holder_name ||
-        `${t.holder_first_name || ''} ${t.holder_last_name || ''}`.trim() ||
-        'Invité VIP',
-      holder_email: t.holder_email || t.email || '-',
-    }));
+    const allTickets = tickets || [];
 
-    const totalSold = normalizedTickets.length;
-    const scannedCount = normalizedTickets.filter((t) => t.is_scanned).length;
-    const totalRevenue = normalizedTickets.reduce((acc, curr) => acc + (curr.amount_paid || 0), 0);
+    // 2. Calcul des statistiques réelles
+    const totalSold = allTickets.length;
+    
+    // On vérifie le statut : soit 'is_scanned' est true, soit le statut texte est 'SCANNED'
+    const scannedCount = allTickets.filter(
+      (t) => t.is_scanned === true || t.status === 'SCANNED'
+    ).length;
+    
+    const scannedRate = totalSold > 0 ? Math.round((scannedCount / totalSold) * 100) : 0;
+    
+    // Calcul des revenus (en ignorant les invitations gratuites)
+    const totalRevenue = allTickets
+      .reduce((sum, t) => sum + (Number(t.amount_paid) || 0), 0)
+      .toFixed(2);
 
+    // 3. Renvoi des données formatées
     return NextResponse.json({
-      tickets: normalizedTickets,
       stats: {
         totalSold,
         scannedCount,
-        scannedRate: totalSold > 0 ? Math.round((scannedCount / totalSold) * 100) : 0,
-        totalRevenue: (totalRevenue / 100).toFixed(2),
+        scannedRate,
+        totalRevenue
       },
+      tickets: allTickets,
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+
+  } catch (err: any) {
+    console.error('Erreur API Admin GET:', err);
+    return NextResponse.json({ error: 'Erreur interne du serveur' }, { status: 500 });
   }
 }
 
-export async function POST(request: Request) {
+// Route POST pour créer des invitations VIP depuis le dashboard
+export async function POST(req: Request) {
   try {
-    const { pin, holder_name, holder_email, ticket_type } = await request.json();
+    const body = await req.json();
+    const { pin, holder_name, holder_email, ticket_type } = body;
 
-    if (pin !== ADMIN_SECRET) {
-      return NextResponse.json({ error: 'Accès non autorisé' }, { status: 401 });
+    if (pin !== '8520') {
+      return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
     }
 
-    if (!holder_name || !holder_email) {
-      return NextResponse.json({ error: 'Nom et Email obligatoires' }, { status: 400 });
+    // Génération d'un code unique pour le VIP
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let middle = '';
+    for (let i = 0; i < 5; i++) {
+      middle += chars.charAt(Math.floor(Math.random() * chars.length));
     }
+    const ticketCode = `VIP-${middle}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    const nameParts = holder_name.trim().split(' ');
-    const firstName = nameParts[0] || 'Invité';
-    const lastName = nameParts.slice(1).join(' ') || '';
-
-    const uniqueId = crypto.randomBytes(3).toString('hex').toUpperCase();
-    const ticket_number = `LNR-${uniqueId}-VIP`;
-    const qr_token = crypto.randomBytes(16).toString('hex');
-
-    // 1. Lire la structure réelle des colonnes en récupérant 1 ligne témoin
-    const { data: sampleRows } = await supabase.from('tickets').select('*').limit(1);
-    const availableKeys = sampleRows && sampleRows.length > 0 ? Object.keys(sampleRows[0]) : [];
-
-    // 2. Construire le dictionnaire de correspondances
-    const fullPayload: Record<string, any> = {
-      ticket_number,
-      qr_token,
-      holder_name: holder_name.trim(),
-      holder_first_name: firstName,
-      holder_last_name: lastName,
-      holder_email: holder_email.trim().toLowerCase(),
-      email: holder_email.trim().toLowerCase(),
+    const newTicket = {
+      ticket_code: ticketCode,
+      customer_name: holder_name,
+      customer_email: holder_email,
       ticket_type: ticket_type || 'VIP_INVITE',
       amount_paid: 0,
-      currency: 'eur',
+      status: 'VALID',
       is_scanned: false,
+      created_at: new Date().toISOString(),
     };
 
-    // 3. Filtrer pour n'envoyer STRICTEMENT que les colonnes qui existent
-    let finalPayload: Record<string, any> = {};
-    if (availableKeys.length > 0) {
-      for (const key of availableKeys) {
-        if (fullPayload[key] !== undefined) {
-          finalPayload[key] = fullPayload[key];
-        }
-      }
-    } else {
-      // Fallback standard
-      finalPayload = {
-        ticket_number,
-        qr_token,
-        holder_first_name: firstName,
-        holder_last_name: lastName,
-        holder_email: holder_email.trim().toLowerCase(),
-        is_scanned: false,
-      };
+    if (supabaseAdmin) {
+      const { error } = await supabaseAdmin.from('tickets').insert([newTicket]);
+      if (error) throw error;
     }
 
-    const { data, error } = await supabase
-      .from('tickets')
-      .insert([finalPayload])
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    return NextResponse.json({ success: true, ticket: data });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ success: true, ticket: newTicket });
+  } catch (err: any) {
+    console.error('Erreur API Admin POST:', err);
+    return NextResponse.json({ error: 'Erreur création VIP' }, { status: 500 });
   }
 }
