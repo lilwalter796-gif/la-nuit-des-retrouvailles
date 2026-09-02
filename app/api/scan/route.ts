@@ -56,7 +56,7 @@ export async function POST(req: Request) {
     }
 
     // 3. CONTRÔLE 2 : Vérification dans Supabase
-    // On cherche le code soit dans ticket_code (anciens billets), soit dans ticket_number (nouveaux billets)
+    // Recherche de la correspondance exacte dans "ticket_number" ou "ticket_code"
     const { data: existingTicket, error: fetchErr } = await supabaseAdmin
       .from('tickets')
       .select('*')
@@ -68,7 +68,7 @@ export async function POST(req: Request) {
     }
 
     if (existingTicket) {
-      // Vérification du statut de scan (on regarde status ou is_scanned)
+      // Tolérance des statuts : on accepte USED, SCANNED ou is_scanned = true
       const statusUpper = String(existingTicket.status || '').toUpperCase();
       const alreadyScanned = statusUpper === 'USED' || statusUpper === 'SCANNED' || existingTicket.is_scanned === true || Boolean(existingTicket.scanned_at);
 
@@ -93,13 +93,12 @@ export async function POST(req: Request) {
         });
       }
 
-      // Marquer le billet comme utilisé dans Supabase
+      // Marquer le billet comme validé dans Supabase
       await supabaseAdmin
         .from('tickets')
         .update({ status: 'USED', is_scanned: true, scanned_at: now })
         .eq('id', existingTicket.id);
 
-      // Enregistrer dans le cache mémoire
       globalUsedTickets.set(cleanCode, {
         scannedAt: now,
         customerName: existingTicket.holder_name || existingTicket.customer_name || 'Invité VIP',
@@ -119,8 +118,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 4. CONTRÔLE 3 : Billet non trouvé en base mais format valide (Fallback d'urgence pour le live)
-    // Accepte désormais LNR et VIP
+    // 4. CONTRÔLE 3 : Accepte LNR et VIP si non trouvés (Sécurité d'urgence)
     if (cleanCode.startsWith('LNR') || cleanCode.startsWith('VIP')) {
       const newTicket = {
         ticket_number: cleanCode,
@@ -134,10 +132,8 @@ export async function POST(req: Request) {
         scanned_at: now,
       };
 
-      // Enregistrement dans Supabase
       await supabaseAdmin.from('tickets').insert([newTicket]);
 
-      // Verrouillage instantané en mémoire
       globalUsedTickets.set(cleanCode, {
         scannedAt: now,
         customerName: newTicket.holder_name,
