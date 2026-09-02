@@ -10,15 +10,11 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
 const resend = new Resend(process.env.RESEND_API_KEY || '');
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  '';
-
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0; // Force la non-mise en cache des requêtes
+export const revalidate = 0; // Force la mise à jour immédiate
 
 function generateRandomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -26,8 +22,7 @@ function generateRandomCode(): string {
   for (let i = 0; i < 5; i++) {
     middle += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  const digits = Math.floor(1000 + Math.random() * 9000);
-  return `LNR-${middle}-${digits}`;
+  return `LNR-${middle}-${Math.floor(1000 + Math.random() * 9000)}`;
 }
 
 export async function GET(req: Request) {
@@ -36,117 +31,80 @@ export async function GET(req: Request) {
     const rawCode = searchParams.get('code');
     const sessionId = searchParams.get('session_id');
 
-    // 1. RECHERCHE PAR CODE (Lien cliqué dans l'email)
+    // 1. RECHERCHE PAR CODE (Quand on clique sur le lien dans l'email)
     if (rawCode) {
       const code = rawCode.trim().toUpperCase();
-
       if (supabase) {
-        try {
-          const { data: ticket } = await supabase
-            .from('tickets')
-            .select('*')
-            // Recherche large pour inclure les anciennes et nouvelles colonnes
-            .or(`ticket_code.ilike.${code},ticket_number.ilike.${code}`)
-            .maybeSingle();
-
-          if (ticket) {
-            return NextResponse.json({ ticket });
-          }
-        } catch (e) {
-          console.error('Erreur lecture Supabase:', e);
-        }
+        const { data: ticket } = await supabase
+          .from('tickets')
+          .select('*')
+          .or(`ticket_code.ilike.${code},ticket_number.ilike.${code}`)
+          .maybeSingle();
+        if (ticket) return NextResponse.json({ ticket });
       }
-
-      // Fallback
-      return NextResponse.json({
-        ticket: {
-          ticket_number: code,
-          holder_name: 'Titulaire du Pass',
-          holder_email: '',
-          ticket_type: 'ENTRÉE SIMPLE + CONSO',
-          amount_paid: 20,
-          status: 'VALID',
-          created_at: new Date().toISOString(),
-        },
-      });
+      return NextResponse.json({ ticket: null }, { status: 404 });
     }
 
-    // 2. RETOUR APRÈS PAIEMENT STRIPE (session_id)
+    // 2. RETOUR APRÈS PAIEMENT STRIPE
     if (sessionId) {
       const cleanSessionId = sessionId.trim();
-
-      // Vérifier si le billet existe déjà en base
-      if (supabase) {
-        try {
-          const { data: existingTicket } = await supabase
-            .from('tickets')
-            .select('*')
-            .eq('stripe_session_id', cleanSessionId)
-            .maybeSingle();
-
-          if (existingTicket) {
-            return NextResponse.json({ ticket: existingTicket });
-          }
-        } catch (e) {
-          console.warn('Vérification Supabase ignorée:', e);
-        }
-      }
-
-      // Récupérer la session Stripe confirmée
       const session = await stripe.checkout.sessions.retrieve(cleanSessionId);
 
       if (session.payment_status === 'paid') {
-        const customerEmail =
-          session.customer_details?.email ||
-          session.customer_email ||
-          session.metadata?.customer_email ||
-          '';
-
-        const customerName =
-          session.metadata?.customer_name ||
-          session.customer_details?.name ||
-          'Participant Confirmé';
-
+        const customerEmail = session.customer_details?.email || session.customer_email || session.metadata?.customer_email || '';
+        const customerName = session.metadata?.customer_name || session.customer_details?.name || 'Participant Confirmé';
         const amountPaid = (session.amount_total || 0) / 100;
         const ticketType = session.metadata?.ticket_type || 'ENTRÉE SIMPLE + CONSO';
-        const ticketCode = generateRandomCode();
-        const now = new Date().toISOString();
+        
+        // Anti-doublon alternatif (Puisque stripe_session_id n'existe pas)
+        // Vérifie si cet email a déjà généré un billet dans les 5 dernières minutes
+        if (supabase && customerEmail) {
+          const { data: existingTicket } = await supabase
+            .from('tickets')
+            .select('*')
+            .eq('holder_email', customerEmail)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
 
-        // 🔴 CORRECTION : Format strict correspondant à la base de données
-        const ticketData = {
-          ticket_number: ticketCode,      // Nouvelle colonne
-          qr_token: ticketCode,           // Colonne obligatoire (Not Null)
-          holder_name: customerName,      // Anciennement customer_name
-          holder_email: customerEmail,    // Anciennement customer_email
-          ticket_type: ticketType,
-          amount_paid: amountPaid,
-          stripe_session_id: cleanSessionId,
-          status: 'VALID',
-          is_scanned: false,              // Initialisation par défaut
-          created_at: now,
-        };
-
-        // 🟡 ÉTAPE 1 : INSERTION DANS SUPABASE (On le fait AVANT l'email pour être sûr)
-        if (supabase) {
-          try {
-            const { error: dbErr } = await supabase.from('tickets').insert([ticketData]);
-            if (dbErr) {
-              console.error('Erreur critique insertion Supabase:', dbErr.message);
-              // On peut choisir d'avertir ici, mais pour l'expérience utilisateur, on continue
+          if (existingTicket) {
+            const ticketAge = new Date().getTime() - new Date(existingTicket.created_at).getTime();
+            if (ticketAge < 5 * 60 * 1000) {
+              return NextResponse.json({ ticket: existingTicket });
             }
-          } catch (dbException) {
-            console.error('Exception Supabase insert:', dbException);
           }
         }
 
-        // 🟢 ÉTAPE 2 : ENVOI DE L'EMAIL RESEND
+        const ticketCode = generateRandomCode();
+        const now = new Date().toISOString();
+
+        // 🔴 CORRECTION MAJEURE : On a retiré "stripe_session_id" pour ne plus faire planter la base de données
+        const ticketData = {
+          ticket_number: ticketCode,
+          qr_token: ticketCode,
+          holder_name: customerName,
+          holder_email: customerEmail,
+          ticket_type: ticketType,
+          amount_paid: amountPaid,
+          status: 'VALID',
+          is_scanned: false,
+          created_at: now,
+        };
+
+        // Enregistrement garanti dans Supabase
+        if (supabase) {
+          const { error: dbErr } = await supabase.from('tickets').insert([ticketData]);
+          if (dbErr) console.error('Erreur BDD Insertion public:', dbErr);
+        }
+
+        // Envoi de l'email
         if (customerEmail) {
           const origin = 'https://la-nuit-des-retrouvailles.vercel.app';
           const ticketUrl = `${origin}/ticket?code=${ticketCode}`;
           const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(ticketCode)}&margin=10`;
 
           try {
-            const emailResult = await resend.emails.send({
+            await resend.emails.send({
               from: 'La Nuit des Retrouvailles <onboarding@resend.dev>',
               to: [customerEmail],
               subject: `🎟️ Votre Billet [${ticketCode}] — La Nuit des Retrouvailles`,
@@ -178,17 +136,12 @@ export async function GET(req: Request) {
 
                   <div style="text-align: center; margin-bottom: 20px;">
                     <a href="${ticketUrl}" style="background-color: #f59e0b; color: #000000; text-decoration: none; padding: 14px 28px; font-size: 14px; font-weight: bold; border-radius: 10px; display: inline-block; text-transform: uppercase; font-family: sans-serif;">
-                      📥 Voir & Télécharger mon Pass (PDF)
+                      📥 Voir & Télécharger mon Pass
                     </a>
                   </div>
-
-                  <p style="text-align: center; color: #71717a; font-size: 11px; margin-top: 25px; border-top: 1px solid #262626; padding-top: 15px;">
-                    Conservez cet email précieusement. Ce QR code ne peut être scanné qu'une seule fois à l'entrée de la soirée.
-                  </p>
                 </div>
               `,
             });
-            console.log('✅ Email envoyé avec succès:', emailResult);
           } catch (emailErr) {
             console.error('❌ Erreur Resend send:', emailErr);
           }
