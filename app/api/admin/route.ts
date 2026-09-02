@@ -2,12 +2,12 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
 
-// Initialisation de Supabase
+// Initialisation de Supabase (utilisation de la clé admin pour contourner le RLS)
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabaseAdmin = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
-// Initialisation de Resend pour l'envoi d'emails
+// Initialisation de Resend
 const resend = new Resend(process.env.RESEND_API_KEY || '');
 
 export const dynamic = 'force-dynamic';
@@ -25,6 +25,7 @@ export async function GET(req: Request) {
       throw new Error("Supabase n'est pas correctement configuré.");
     }
 
+    // Récupération de tous les billets triés du plus récent au plus ancien
     const { data: tickets, error } = await supabaseAdmin
       .from('tickets')
       .select('*')
@@ -65,7 +66,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
     }
 
-    // 1. Génération du code VIP
+    // 1. Génération d'un code VIP unique
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let middle = '';
     for (let i = 0; i < 5; i++) {
@@ -73,15 +74,16 @@ export async function POST(req: Request) {
     }
     const ticketCode = `VIP-${middle}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    // 2. Format exact correspondant à un achat Stripe pour éviter les erreurs Supabase
+    // 2. Création de l'objet avec les VRAIS noms de colonnes Supabase (holder_name, etc.)
     const newTicket = {
-      ticket_code: ticketCode,
-      customer_name: holder_name,
-      customer_email: holder_email,
+      ticket_number: ticketCode,
+      holder_name: holder_name,
+      holder_email: holder_email,
       ticket_type: ticket_type || 'VIP_INVITE',
       amount_paid: 0,
-      stripe_session_id: `vip_invite_${Date.now()}`, // Remplit la colonne obligatoire
+      stripe_session_id: `vip_invite_${Date.now()}`,
       status: 'VALID',
+      is_scanned: false,
       created_at: new Date().toISOString(),
     };
 
@@ -102,7 +104,7 @@ export async function POST(req: Request) {
 
       try {
         await resend.emails.send({
-          // NOTE: Changez l'adresse 'from' si vous avez validé votre propre nom de domaine
+          // Attention : Remplacez onboarding@resend.dev quand votre domaine sera validé
           from: 'La Nuit des Retrouvailles <onboarding@resend.dev>',
           to: [holder_email],
           subject: `🎟️ Invitation VIP [${ticketCode}] — La Nuit des Retrouvailles`,
@@ -133,7 +135,7 @@ export async function POST(req: Request) {
 
               <div style="text-align: center; margin-bottom: 20px;">
                 <a href="${ticketUrl}" style="background-color: #f59e0b; color: #000000; text-decoration: none; padding: 14px 28px; font-size: 14px; font-weight: bold; border-radius: 10px; display: inline-block; text-transform: uppercase; font-family: sans-serif;">
-                  📥 Voir & Télécharger mon Pass (PDF)
+                  📥 Voir & Télécharger mon Pass
                 </a>
               </div>
             </div>
@@ -147,7 +149,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true, ticket: newTicket });
   } catch (err: any) {
     console.error('Erreur API Admin POST:', err);
-    // Renvoie le message d'erreur exact pour déboguer si Supabase refuse toujours l'insertion
     return NextResponse.json({ error: err.message || 'Erreur création VIP' }, { status: 500 });
   }
 }
