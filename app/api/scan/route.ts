@@ -45,8 +45,8 @@ export async function POST(req: Request) {
         status: 'ALREADY_USED',
         message: '⛔ BILLET DÉJÀ UTILISÉ !',
         ticket: {
-          ticket_code: cleanCode,
-          customer_name: cached.customerName,
+          ticket_number: cleanCode,
+          holder_name: cached.customerName,
           ticket_type: cached.ticketType,
           status: 'USED',
           scanned_at: cached.scannedAt,
@@ -56,10 +56,11 @@ export async function POST(req: Request) {
     }
 
     // 3. CONTRÔLE 2 : Vérification dans Supabase
+    // On cherche le code soit dans ticket_code (anciens billets), soit dans ticket_number (nouveaux billets)
     const { data: existingTicket, error: fetchErr } = await supabaseAdmin
       .from('tickets')
       .select('*')
-      .ilike('ticket_code', cleanCode)
+      .or(`ticket_code.ilike.${cleanCode},ticket_number.ilike.${cleanCode}`)
       .maybeSingle();
 
     if (fetchErr) {
@@ -67,15 +68,16 @@ export async function POST(req: Request) {
     }
 
     if (existingTicket) {
+      // Vérification du statut de scan (on regarde status ou is_scanned)
       const statusUpper = String(existingTicket.status || '').toUpperCase();
-      const alreadyScanned = statusUpper === 'USED' || Boolean(existingTicket.scanned_at);
+      const alreadyScanned = statusUpper === 'USED' || statusUpper === 'SCANNED' || existingTicket.is_scanned === true || Boolean(existingTicket.scanned_at);
 
       if (alreadyScanned) {
         const firstScanTime = existingTicket.scanned_at || now;
         globalUsedTickets.set(cleanCode, {
           scannedAt: firstScanTime,
-          customerName: existingTicket.customer_name || 'Invité Confirmé',
-          ticketType: existingTicket.ticket_type || 'PASS OFFICIEL',
+          customerName: existingTicket.holder_name || existingTicket.customer_name || 'Invité',
+          ticketType: existingTicket.ticket_type || 'PASS',
         });
 
         return NextResponse.json({
@@ -83,8 +85,8 @@ export async function POST(req: Request) {
           message: '⛔ BILLET DÉJÀ UTILISÉ !',
           ticket: {
             ...existingTicket,
-            ticket_code: cleanCode,
             status: 'USED',
+            is_scanned: true,
             scanned_at: firstScanTime,
           },
           scannedAt: firstScanTime,
@@ -94,14 +96,14 @@ export async function POST(req: Request) {
       // Marquer le billet comme utilisé dans Supabase
       await supabaseAdmin
         .from('tickets')
-        .update({ status: 'USED', scanned_at: now })
+        .update({ status: 'USED', is_scanned: true, scanned_at: now })
         .eq('id', existingTicket.id);
 
       // Enregistrer dans le cache mémoire
       globalUsedTickets.set(cleanCode, {
         scannedAt: now,
-        customerName: existingTicket.customer_name || 'Invité VIP',
-        ticketType: existingTicket.ticket_type || 'PASS OFFICIEL',
+        customerName: existingTicket.holder_name || existingTicket.customer_name || 'Invité VIP',
+        ticketType: existingTicket.ticket_type || 'PASS',
       });
 
       return NextResponse.json({
@@ -110,21 +112,25 @@ export async function POST(req: Request) {
         ticket: {
           ...existingTicket,
           status: 'USED',
+          is_scanned: true,
           scanned_at: now,
         },
         scannedAt: now,
       });
     }
 
-    // 4. CONTRÔLE 3 : Billet au format valide LNR- non encore en base (Premier Scan)
-    if (cleanCode.startsWith('LNR')) {
+    // 4. CONTRÔLE 3 : Billet non trouvé en base mais format valide (Fallback d'urgence pour le live)
+    // Accepte désormais LNR et VIP
+    if (cleanCode.startsWith('LNR') || cleanCode.startsWith('VIP')) {
       const newTicket = {
-        ticket_code: cleanCode,
-        customer_name: 'Invité Confirmé',
-        customer_email: 'Validé sur place',
-        ticket_type: 'PASS OFFICIEL',
-        amount_paid: 20,
+        ticket_number: cleanCode,
+        qr_token: cleanCode,
+        holder_name: cleanCode.startsWith('VIP') ? 'Invité VIP' : 'Acheteur Confirmé',
+        holder_email: 'Validé sur place',
+        ticket_type: cleanCode.startsWith('VIP') ? 'VIP_INVITE' : 'PASS OFFICIEL',
+        amount_paid: cleanCode.startsWith('VIP') ? 0 : 20,
         status: 'USED',
+        is_scanned: true,
         scanned_at: now,
       };
 
@@ -134,7 +140,7 @@ export async function POST(req: Request) {
       // Verrouillage instantané en mémoire
       globalUsedTickets.set(cleanCode, {
         scannedAt: now,
-        customerName: newTicket.customer_name,
+        customerName: newTicket.holder_name,
         ticketType: newTicket.ticket_type,
       });
 
