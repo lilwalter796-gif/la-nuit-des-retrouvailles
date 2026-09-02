@@ -74,14 +74,13 @@ export async function POST(req: Request) {
     }
     const ticketCode = `VIP-${middle}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    // 2. Création de l'objet avec les VRAIS noms de colonnes Supabase (holder_name, etc.)
+    // 2. Création de l'objet SANS la colonne stripe_session_id
     const newTicket = {
       ticket_number: ticketCode,
       holder_name: holder_name,
       holder_email: holder_email,
       ticket_type: ticket_type || 'VIP_INVITE',
       amount_paid: 0,
-      stripe_session_id: `vip_invite_${Date.now()}`,
       status: 'VALID',
       is_scanned: false,
       created_at: new Date().toISOString(),
@@ -104,7 +103,6 @@ export async function POST(req: Request) {
 
       try {
         await resend.emails.send({
-          // Attention : Remplacez onboarding@resend.dev quand votre domaine sera validé
           from: 'La Nuit des Retrouvailles <onboarding@resend.dev>',
           to: [holder_email],
           subject: `🎟️ Invitation VIP [${ticketCode}] — La Nuit des Retrouvailles`,
