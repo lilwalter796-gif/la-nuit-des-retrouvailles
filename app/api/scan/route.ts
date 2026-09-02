@@ -1,17 +1,18 @@
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { createClient } from '@supabase/supabase-js';
+
+// 🔴 CORRECTION : Initialisation DIRECTE avec la clé d'administration pour FORCER la mise à jour (Bypass RLS)
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabaseAdmin = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 export const dynamic = 'force-dynamic';
 
-// Cache mémoire serveur haute performance (persistance immédiate)
+// Cache mémoire serveur
 const globalUsedTickets = new Map<string, { scannedAt: string; customerName: string; ticketType: string }>();
 
 function normalizeCode(str: string): string {
-  return String(str || '')
-    .trim()
-    .replace(/\s+/g, '')
-    .toUpperCase()
-    .replace(/[^A-Z0-9-]/g, '');
+  return String(str || '').trim().replace(/\s+/g, '').toUpperCase().replace(/[^A-Z0-9-]/g, '');
 }
 
 export async function POST(req: Request) {
@@ -25,6 +26,11 @@ export async function POST(req: Request) {
 
     if (!code) {
       return NextResponse.json({ status: 'INVALID', message: 'Aucun code fourni' }, { status: 400 });
+    }
+
+    if (!supabaseAdmin) {
+      console.error('Supabase admin non configuré dans le scanner');
+      return NextResponse.json({ status: 'INVALID', message: 'Erreur serveur BDD' }, { status: 500 });
     }
 
     let inputStr = String(code).trim();
@@ -90,7 +96,7 @@ export async function POST(req: Request) {
         });
       }
 
-      // 🔴 CORRECTION ICI : Mise à jour en ciblant expressément le numéro du billet
+      // 🔴 MISE A JOUR FORCÉE DANS SUPABASE
       const matchCol = existingTicket.ticket_number ? 'ticket_number' : 'ticket_code';
       const matchVal = existingTicket.ticket_number || existingTicket.ticket_code;
 
