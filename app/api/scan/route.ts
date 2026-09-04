@@ -1,14 +1,13 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// 🔴 CORRECTION : Initialisation DIRECTE avec la clé d'administration pour FORCER la mise à jour (Bypass RLS)
+export const dynamic = 'force-dynamic';
+export const revalidate = 0; 
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabaseAdmin = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
-export const dynamic = 'force-dynamic';
-
-// Cache mémoire serveur
 const globalUsedTickets = new Map<string, { scannedAt: string; customerName: string; ticketType: string }>();
 
 function normalizeCode(str: string): string {
@@ -20,25 +19,13 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { code, pin } = body;
 
-    if (pin !== '8520') {
-      return NextResponse.json({ status: 'INVALID', message: 'Code PIN incorrect' }, { status: 401 });
-    }
-
-    if (!code) {
-      return NextResponse.json({ status: 'INVALID', message: 'Aucun code fourni' }, { status: 400 });
-    }
-
-    if (!supabaseAdmin) {
-      console.error('Supabase admin non configuré dans le scanner');
-      return NextResponse.json({ status: 'INVALID', message: 'Erreur serveur BDD' }, { status: 500 });
-    }
+    if (pin !== '8520') return NextResponse.json({ status: 'INVALID', message: 'Code PIN incorrect' }, { status: 401 });
+    if (!code) return NextResponse.json({ status: 'INVALID', message: 'Aucun code fourni' }, { status: 400 });
+    if (!supabaseAdmin) return NextResponse.json({ status: 'INVALID', message: 'Erreur serveur BDD' }, { status: 500 });
 
     let inputStr = String(code).trim();
-    if (inputStr.includes('code=')) {
-      inputStr = inputStr.split('code=')[1].split('&')[0];
-    } else if (inputStr.includes('/ticket/')) {
-      inputStr = inputStr.split('/ticket/')[1].split('?')[0];
-    }
+    if (inputStr.includes('code=')) inputStr = inputStr.split('code=')[1].split('&')[0];
+    else if (inputStr.includes('/ticket/')) inputStr = inputStr.split('/ticket/')[1].split('?')[0];
 
     const cleanCode = normalizeCode(inputStr);
     const now = new Date().toISOString();
@@ -53,10 +40,8 @@ export async function POST(req: Request) {
           ticket_number: cleanCode,
           holder_name: cached.customerName,
           ticket_type: cached.ticketType,
-          status: 'USED',
-          scanned_at: cached.scannedAt,
-        },
-        scannedAt: cached.scannedAt,
+          status: 'USED'
+        }
       });
     }
 
@@ -67,46 +52,33 @@ export async function POST(req: Request) {
       .or(`ticket_code.ilike.${cleanCode},ticket_number.ilike.${cleanCode}`)
       .maybeSingle();
 
-    if (fetchErr) {
-      console.error('Erreur Supabase Scan Query:', fetchErr);
-    }
-
     if (existingTicket) {
       const statusUpper = String(existingTicket.status || '').toUpperCase();
-      const alreadyScanned = statusUpper === 'USED' || statusUpper === 'SCANNED' || existingTicket.is_scanned === true || Boolean(existingTicket.scanned_at);
+      const alreadyScanned = statusUpper === 'USED' || statusUpper === 'SCANNED' || existingTicket.is_scanned === true;
 
       if (alreadyScanned) {
-        const firstScanTime = existingTicket.scanned_at || now;
-        globalUsedTickets.set(cleanCode, {
-          scannedAt: firstScanTime,
-          customerName: existingTicket.holder_name || existingTicket.customer_name || 'Invité',
-          ticketType: existingTicket.ticket_type || 'PASS',
-        });
-
         return NextResponse.json({
           status: 'ALREADY_USED',
           message: '⛔ BILLET DÉJÀ UTILISÉ !',
-          ticket: {
-            ...existingTicket,
-            status: 'USED',
-            is_scanned: true,
-            scanned_at: firstScanTime,
-          },
-          scannedAt: firstScanTime,
+          ticket: existingTicket
         });
       }
 
-      // 🔴 MISE A JOUR FORCÉE DANS SUPABASE
+      // 🔴 CORRECTION : On retire "scanned_at" pour ne plus faire planter la base !
       const matchCol = existingTicket.ticket_number ? 'ticket_number' : 'ticket_code';
       const matchVal = existingTicket.ticket_number || existingTicket.ticket_code;
 
       const { error: updateErr } = await supabaseAdmin
         .from('tickets')
-        .update({ status: 'USED', is_scanned: true, scanned_at: now })
+        .update({ status: 'USED', is_scanned: true }) 
         .eq(matchCol, matchVal);
 
+      // 🔴 NOUVEAUTÉ : Si la base plante, on bloque tout et on affiche l'erreur sur le téléphone !
       if (updateErr) {
-        console.error('Erreur critique validation Supabase:', updateErr);
+        return NextResponse.json({
+          status: 'INVALID',
+          message: `❌ ERREUR BDD : ${updateErr.message}`
+        });
       }
 
       globalUsedTickets.set(cleanCode, {
@@ -118,13 +90,7 @@ export async function POST(req: Request) {
       return NextResponse.json({
         status: 'VALID',
         message: '✅ ENTRÉE VALIDÉE',
-        ticket: {
-          ...existingTicket,
-          status: 'USED',
-          is_scanned: true,
-          scanned_at: now,
-        },
-        scannedAt: now,
+        ticket: { ...existingTicket, status: 'USED', is_scanned: true }
       });
     }
 
@@ -138,8 +104,7 @@ export async function POST(req: Request) {
         ticket_type: cleanCode.startsWith('VIP') ? 'VIP_INVITE' : 'PASS OFFICIEL',
         amount_paid: cleanCode.startsWith('VIP') ? 0 : 20,
         status: 'USED',
-        is_scanned: true,
-        scanned_at: now,
+        is_scanned: true
       };
 
       await supabaseAdmin.from('tickets').insert([newTicket]);
@@ -153,18 +118,13 @@ export async function POST(req: Request) {
       return NextResponse.json({
         status: 'VALID',
         message: '✅ ENTRÉE VALIDÉE',
-        ticket: newTicket,
-        scannedAt: now,
+        ticket: newTicket
       });
     }
 
-    return NextResponse.json({
-      status: 'INVALID',
-      message: '❌ BILLET INCONNU',
-    });
+    return NextResponse.json({ status: 'INVALID', message: '❌ BILLET INCONNU' });
 
   } catch (err: any) {
-    console.error('Erreur API Scan:', err);
-    return NextResponse.json({ status: 'INVALID', message: 'Erreur serveur interne' }, { status: 500 });
+    return NextResponse.json({ status: 'INVALID', message: `Erreur interne: ${err.message}` }, { status: 500 });
   }
 }
