@@ -1,15 +1,14 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Initialisation DIRECTE avec la clé d'administration pour FORCER la mise à jour (Bypass RLS)
+// Initialisation DIRECTE avec la clé d'administration pour FORCER la mise à jour
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabaseAdmin = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0; // Ajouté pour empêcher Vercel de mettre l'API en cache
+export const revalidate = 0;
 
-// Cache mémoire serveur (Intact)
 const globalUsedTickets = new Map<string, { scannedAt: string; customerName: string; ticketType: string }>();
 
 function normalizeCode(str: string): string {
@@ -30,7 +29,6 @@ export async function POST(req: Request) {
     }
 
     if (!supabaseAdmin) {
-      console.error('Supabase admin non configuré dans le scanner');
       return NextResponse.json({ status: 'INVALID', message: 'Erreur serveur BDD' }, { status: 500 });
     }
 
@@ -44,7 +42,7 @@ export async function POST(req: Request) {
     const cleanCode = normalizeCode(inputStr);
     const now = new Date().toISOString();
 
-    // 1. CONTRÔLE MÉMOIRE (Intact)
+    // 1. CONTRÔLE MÉMOIRE
     if (globalUsedTickets.has(cleanCode)) {
       const cached = globalUsedTickets.get(cleanCode)!;
       return NextResponse.json({
@@ -61,17 +59,28 @@ export async function POST(req: Request) {
       });
     }
 
-    // 2. CONTRÔLE SUPABASE
-    const { data: existingTicket, error: fetchErr } = await supabaseAdmin
-      .from('tickets')
-      .select('*')
-      .or(`ticket_code.ilike.${cleanCode},ticket_number.ilike.${cleanCode},qr_token.ilike.${cleanCode}`) // Sécurisé pour chercher partout
-      .maybeSingle();
-
-    if (fetchErr) {
-      console.error('Erreur Supabase Scan Query:', fetchErr);
+    // 2. RECHERCHE SÉCURISÉE (SÉPARÉE POUR ÉVITER LE CRASH SQL)
+    let existingTicket = null;
+    
+    // Essai 1 : Recherche sur ticket_number
+    const { data: t1 } = await supabaseAdmin.from('tickets').select('*').ilike('ticket_number', cleanCode).maybeSingle();
+    if (t1) {
+      existingTicket = t1;
+    } else {
+      // Essai 2 : Recherche sur qr_token
+      const { data: t2 } = await supabaseAdmin.from('tickets').select('*').ilike('qr_token', cleanCode).maybeSingle();
+      if (t2) {
+        existingTicket = t2;
+      } else {
+        // Essai 3 : Recherche sur l'ancienne colonne (on ignore l'erreur si elle a été supprimée)
+        const { data: t3 } = await supabaseAdmin.from('tickets').select('*').ilike('ticket_code', cleanCode).maybeSingle();
+        if (t3) {
+          existingTicket = t3;
+        }
+      }
     }
 
+    // 3. SI LE BILLET A ÉTÉ TROUVÉ
     if (existingTicket) {
       const statusUpper = String(existingTicket.status || '').toUpperCase();
       const alreadyScanned = statusUpper === 'USED' || statusUpper === 'SCANNED' || existingTicket.is_scanned === true || Boolean(existingTicket.scanned_at);
@@ -97,18 +106,16 @@ export async function POST(req: Request) {
         });
       }
 
-      // 🔴 LA SEULE VRAIE CORRECTION : MISE A JOUR FORCÉE DANS SUPABASE PAR L'ID UNIQUE
+      // MISE A JOUR FORCÉE DANS SUPABASE PAR L'ID UNIQUE
       const { error: updateErr } = await supabaseAdmin
         .from('tickets')
-        .update({ status: 'USED', is_scanned: true }) // Retrait volontaire de scanned_at pour éviter l'erreur SQL
-        .eq('id', existingTicket.id); // Utilisation de l'ID absolue !
+        .update({ status: 'USED', is_scanned: true })
+        .eq('id', existingTicket.id); 
 
       if (updateErr) {
-        console.error('Erreur critique validation Supabase:', updateErr);
-        return NextResponse.json({ status: 'INVALID', message: `❌ ERREUR BDD : ${updateErr.message}` }); // Affiché sur l'écran
+        return NextResponse.json({ status: 'INVALID', message: `❌ ERREUR UPDATE BDD : ${updateErr.message}` });
       }
 
-      // Cache mémoire (Intact)
       globalUsedTickets.set(cleanCode, {
         scannedAt: now,
         customerName: existingTicket.holder_name || existingTicket.customer_name || 'Invité VIP',
@@ -128,7 +135,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 3. FALLBACK D'URGENCE LNR & VIP (Intact)
+    // 4. FALLBACK D'URGENCE LNR & VIP (SI LE BILLET N'EXISTE VRAIMENT PAS)
     if (cleanCode.startsWith('LNR') || cleanCode.startsWith('VIP')) {
       const newTicket = {
         ticket_number: cleanCode,
@@ -155,7 +162,7 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         status: 'VALID',
-        message: '✅ ENTRÉE VALIDÉE',
+        message: '✅ ENTRÉE VALIDÉE (Créé sur place)',
         ticket: { ...newTicket, scanned_at: now },
         scannedAt: now,
       });
