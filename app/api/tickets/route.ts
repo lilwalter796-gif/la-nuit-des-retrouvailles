@@ -78,7 +78,6 @@ export async function GET(req: Request) {
         const ticketCode = generateRandomCode();
         const now = new Date().toISOString();
 
-        // 🔴 CORRECTION MAJEURE : On a retiré "stripe_session_id" pour ne plus faire planter la base de données
         const ticketData = {
           ticket_number: ticketCode,
           qr_token: ticketCode,
@@ -97,15 +96,15 @@ export async function GET(req: Request) {
           if (dbErr) console.error('Erreur BDD Insertion public:', dbErr);
         }
 
-        // Envoi de l'email
+        // Envoi de l'email avec le domaine officiel vérifié
         if (customerEmail) {
-          const origin = 'https://la-nuit-des-retrouvailles.vercel.app';
+          const origin = 'https://lanuitdesretrouvailles.com';
           const ticketUrl = `${origin}/ticket?code=${ticketCode}`;
           const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(ticketCode)}&margin=10`;
 
           try {
             await resend.emails.send({
-              from: 'La Nuit des Retrouvailles <onboarding@resend.dev>',
+              from: 'La Nuit des Retrouvailles <contact@lanuitdesretrouvailles.com>',
               to: [customerEmail],
               subject: `🎟️ Votre Billet [${ticketCode}] — La Nuit des Retrouvailles`,
               html: `
