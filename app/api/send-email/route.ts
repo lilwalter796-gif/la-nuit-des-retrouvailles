@@ -17,11 +17,11 @@ export async function POST(req: Request) {
     }
 
     const resend = new Resend(apiKey);
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://la-nuit-des-retrouvailles.vercel.app';
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://lanuitdesretrouvailles.com';
     const ticketUrl = `${siteUrl}/ticket?code=${encodeURIComponent(ticketCode)}`;
 
     const { data, error } = await resend.emails.send({
-      from: 'La Nuit des Retrouvailles <onboarding@resend.dev>',
+      from: 'La Nuit des Retrouvailles <contact@lanuitdesretrouvailles.com>',
       to: [toEmail],
       subject: `Votre Billet Officiel - La Nuit des Retrouvailles (${ticketCode})`,
       html: `
@@ -41,11 +41,11 @@ export async function POST(req: Request) {
             <div style="background-color: #1c1c1f; border-radius: 16px; padding: 16px; text-align: left; margin-bottom: 24px;">
               <div style="margin-bottom: 12px; border-bottom: 1px solid #27272a; padding-bottom: 8px;">
                 <span style="color: #71717a; font-size: 11px; text-transform: uppercase; display: block;">Participant</span>
-                <strong style="color: #ffffff; font-size: 14px;">${customerName}</strong>
+                <strong style="color: #ffffff; font-size: 14px;">${customerName || 'Participant'}</strong>
               </div>
               <div style="margin-bottom: 12px; border-bottom: 1px solid #27272a; padding-bottom: 8px;">
                 <span style="color: #71717a; font-size: 11px; text-transform: uppercase; display: block;">Formule</span>
-                <strong style="color: #f59e0b; font-size: 14px;">${ticketType}</strong>
+                <strong style="color: #f59e0b; font-size: 14px;">${ticketType || 'ENTRÉE SIMPLE'}</strong>
               </div>
               <div>
                 <span style="color: #71717a; font-size: 11px; text-transform: uppercase; display: block;">Code Pass Unique</span>
