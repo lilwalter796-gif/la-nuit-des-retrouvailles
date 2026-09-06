@@ -15,7 +15,9 @@ import {
   Wine, 
   MapPin, 
   Download,
-  Eye
+  Eye,
+  Mail,
+  Check
 } from 'lucide-react';
 import QRCode from 'qrcode';
 
@@ -23,7 +25,7 @@ export default function AdminDashboard() {
   const [pin, setPin] = useState('');
   const [unlocked, setUnlocked] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false); // Pour le refresh silencieux
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [stats, setStats] = useState<any>({ totalSold: 0, scannedCount: 0, scannedRate: 0, totalRevenue: '0.00' });
   const [tickets, setTickets] = useState<any[]>([]);
   const [search, setSearch] = useState('');
@@ -37,8 +39,11 @@ export default function AdminDashboard() {
   // Popup Modal Billet Direct
   const [selectedTicket, setSelectedTicket] = useState<any>(null);
   const [modalQrUrl, setModalQrUrl] = useState<string>('');
+  
+  // État pour l'envoi d'e-mail depuis la modale
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [emailSentSuccess, setEmailSentSuccess] = useState(false);
 
-  // Fonction de récupération modifiée pour accepter un mode "silencieux" (sans bloquer l'UI)
   const fetchData = async (secretPin: string, silent = false) => {
     if (!silent) setLoading(true);
     if (silent) setIsRefreshing(true);
@@ -61,12 +66,11 @@ export default function AdminDashboard() {
     }
   };
 
-  // 🔴 NOUVEAU : Auto-refresh toutes les 5 secondes quand le dashboard est déverrouillé
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (unlocked && pin) {
       interval = setInterval(() => {
-        fetchData(pin, true); // Appelle la base de données en mode "silencieux"
+        fetchData(pin, true);
       }, 5000);
     }
     return () => {
@@ -76,6 +80,7 @@ export default function AdminDashboard() {
 
   const openTicketModal = async (ticket: any) => {
     setSelectedTicket(ticket);
+    setEmailSentSuccess(false);
     const codeToEncode = ticket.qr_token || ticket.ticket_number || ticket.ticket_code;
     try {
       const qrData = await QRCode.toDataURL(codeToEncode, {
@@ -86,6 +91,45 @@ export default function AdminDashboard() {
       setModalQrUrl(qrData);
     } catch (err) {
       console.error('Erreur génération QR:', err);
+    }
+  };
+
+  // 📧 Fonction pour déclencher l'envoi d'e-mail depuis l'admin
+  const handleSendEmailToClient = async () => {
+    if (!selectedTicket) return;
+    const emailTo = selectedTicket.holder_email || selectedTicket.customer_email;
+    
+    if (!emailTo) {
+      alert("Aucune adresse e-mail enregistrée pour ce participant.");
+      return;
+    }
+
+    setSendingEmail(true);
+    setEmailSentSuccess(false);
+
+    try {
+      const res = await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          toEmail: emailTo,
+          customerName: selectedTicket.holder_name || selectedTicket.customer_name,
+          ticketCode: selectedTicket.ticket_number || selectedTicket.ticket_code,
+          ticketType: selectedTicket.ticket_type || 'ENTRÉE SIMPLE',
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Erreur lors de l'envoi");
+      }
+
+      setEmailSentSuccess(true);
+      setTimeout(() => setEmailSentSuccess(false), 4000);
+    } catch (err: any) {
+      alert(`Erreur d'envoi : ${err.message}`);
+    } finally {
+      setSendingEmail(false);
     }
   };
 
@@ -351,7 +395,7 @@ export default function AdminDashboard() {
 
       </div>
 
-      {/* POPUP MODALE : PASS ET QR CODE DIRECTS */}
+      {/* POPUP MODALE : PASS, QR CODE & ENVOI EMAIL */}
       {selectedTicket && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-gradient-to-b from-neutral-900 to-neutral-950 border border-neutral-800 rounded-3xl p-6 max-w-sm w-full relative shadow-2xl animate-in fade-in zoom-in-95 duration-150">
@@ -378,6 +422,10 @@ export default function AdminDashboard() {
                 <span className="font-bold text-white uppercase">{selectedTicket.holder_name || selectedTicket.customer_name}</span>
               </div>
               <div className="flex justify-between">
+                <span className="text-neutral-400">Email :</span>
+                <span className="text-neutral-300 font-mono text-[11px]">{selectedTicket.holder_email || selectedTicket.customer_email}</span>
+              </div>
+              <div className="flex justify-between">
                 <span className="text-neutral-400">Numéro Billet :</span>
                 <span className="font-mono text-amber-400 font-bold">{selectedTicket.ticket_number || selectedTicket.ticket_code}</span>
               </div>
@@ -393,7 +441,7 @@ export default function AdminDashboard() {
             <div className="my-4 flex flex-col items-center">
               <div className="p-3 bg-white rounded-2xl shadow-xl border-4 border-amber-500/30">
                 {modalQrUrl && (
-                  <img src={modalQrUrl} alt="QR Code d'accès" className="w-48 h-48 rounded-lg object-contain" />
+                  <img src={modalQrUrl} alt="QR Code d'accès" className="w-44 h-44 rounded-lg object-contain" />
                 )}
               </div>
               <p className="text-[10px] uppercase font-bold text-neutral-400 tracking-wider mt-2.5">
@@ -401,26 +449,45 @@ export default function AdminDashboard() {
               </p>
             </div>
 
+            {/* MESSAGE DE SUCCÈS D'ENVOI D'EMAIL */}
+            {emailSentSuccess && (
+              <div className="mb-3 bg-emerald-950 border border-emerald-500/40 text-emerald-300 text-xs p-2.5 rounded-xl text-center font-bold flex items-center justify-center gap-1.5">
+                <Check className="w-4 h-4" /> E-mail du billet envoyé avec succès !
+              </div>
+            )}
+
             <div className="bg-neutral-900/80 border border-neutral-800 rounded-xl p-2.5 mb-4 text-[11px] text-neutral-300 flex items-center justify-between">
               <span className="flex items-center gap-1.5"><Wine className="w-3.5 h-3.5 text-amber-400" /> 1 Boisson incluse</span>
               <span className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-amber-400" /> Parma</span>
             </div>
 
-            <div className="flex gap-2">
+            {/* BOUTONS D'ACTION (Imprimer, Envoyer Email, Fermer) */}
+            <div className="space-y-2">
               <button
                 type="button"
-                onClick={() => window.print()}
-                className="flex-1 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-white font-bold py-2.5 rounded-xl uppercase text-[11px] tracking-wider flex items-center justify-center gap-1.5 transition"
+                onClick={handleSendEmailToClient}
+                disabled={sendingEmail}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl uppercase text-[11px] tracking-wider flex items-center justify-center gap-2 transition shadow-lg"
               >
-                <Download className="w-3.5 h-3.5 text-amber-400" /> Imprimer
+                <Mail className="w-4 h-4" /> {sendingEmail ? 'Envoi en cours...' : 'Envoyer le Billet par E-mail'}
               </button>
-              <button
-                type="button"
-                onClick={() => setSelectedTicket(null)}
-                className="flex-1 bg-amber-500 hover:bg-amber-400 text-black font-black py-2.5 rounded-xl uppercase text-[11px] tracking-wider transition"
-              >
-                Fermer
-              </button>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="flex-1 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-white font-bold py-2.5 rounded-xl uppercase text-[11px] tracking-wider flex items-center justify-center gap-1.5 transition"
+                >
+                  <Download className="w-3.5 h-3.5 text-amber-400" /> Imprimer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedTicket(null)}
+                  className="flex-1 bg-neutral-800 hover:bg-neutral-700 text-white font-bold py-2.5 rounded-xl uppercase text-[11px] tracking-wider transition"
+                >
+                  Fermer
+                </button>
+              </div>
             </div>
 
           </div>
