@@ -7,10 +7,10 @@ import Link from 'next/link';
 function TicketContent() {
   const searchParams = useSearchParams();
   const [ticket, setTicket] = useState<{
-    customer_name: string;
-    customer_email: string;
+    holder_name: string;
+    holder_email: string;
     ticket_type: string;
-    ticket_code: string;
+    ticket_number: string;
     amount_paid: number;
     status: string;
   } | null>(null);
@@ -62,6 +62,7 @@ function TicketContent() {
   };
 
   const handleAddToAppleCalendar = () => {
+    const codeValue = ticket?.ticket_number || '';
     const icsData = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
@@ -69,7 +70,7 @@ function TicketContent() {
       'CALSCALE:GREGORIAN',
       'BEGIN:VEVENT',
       `SUMMARY:${EVENT_DETAILS.title}`,
-      `DESCRIPTION:${EVENT_DETAILS.description} Code pass: ${ticket?.ticket_code || ''}`,
+      `DESCRIPTION:${EVENT_DETAILS.description} Code pass: ${codeValue}`,
       `LOCATION:${EVENT_DETAILS.location}`,
       `DTSTART:${EVENT_DETAILS.startDate}`,
       `DTEND:${EVENT_DETAILS.endDate}`,
@@ -93,10 +94,11 @@ function TicketContent() {
   };
 
   const handleAddToGoogleCalendar = () => {
+    const codeValue = ticket?.ticket_number || '';
     const googleCalendarUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
       EVENT_DETAILS.title
     )}&dates=${EVENT_DETAILS.startDate}/${EVENT_DETAILS.endDate}&details=${encodeURIComponent(
-      `${EVENT_DETAILS.description}\nCode Pass : ${ticket?.ticket_code || ''}`
+      `${EVENT_DETAILS.description}\nCode Pass : ${codeValue}`
     )}&location=${encodeURIComponent(EVENT_DETAILS.location)}`;
     window.open(googleCalendarUrl, '_blank');
   };
@@ -121,8 +123,9 @@ function TicketContent() {
     );
   }
 
+  const codeString = ticket.ticket_number;
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
-    ticket.ticket_code
+    codeString
   )}&margin=10`;
 
   return (
@@ -191,7 +194,7 @@ function TicketContent() {
           <div className="mt-4 text-center">
             <span className="text-[11px] uppercase tracking-wider text-zinc-500 font-mono block">Code Unique</span>
             <span className="text-base font-mono font-black text-amber-400 print-text-dark tracking-widest">
-              {ticket.ticket_code}
+              {ticket.ticket_number}
             </span>
           </div>
         </div>
@@ -207,7 +210,7 @@ function TicketContent() {
         <div className="p-6 bg-zinc-950/70 space-y-3 print-border">
           <div className="flex justify-between items-center text-xs pb-2 border-b border-zinc-800/60 print-border">
             <span className="text-zinc-400 print-text-dark">Titulaire</span>
-            <strong className="text-white print-text-dark font-medium">{ticket.customer_name}</strong>
+            <strong className="text-white print-text-dark font-medium uppercase">{ticket.holder_name}</strong>
           </div>
           <div className="flex justify-between items-center text-xs pb-2 border-b border-zinc-800/60 print-border">
             <span className="text-zinc-400 print-text-dark">Formule</span>
@@ -220,7 +223,7 @@ function TicketContent() {
           <div className="flex justify-between items-center text-xs">
             <span className="text-zinc-400 print-text-dark">Statut du Pass</span>
             <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded text-[10px] font-black uppercase">
-              {ticket.status === 'USED' ? 'Déjà Scanné' : 'Valide'}
+              {ticket.status === 'USED' || ticket.status === 'SCANNED' ? 'Déjà Scanné' : 'Valide'}
             </span>
           </div>
         </div>
